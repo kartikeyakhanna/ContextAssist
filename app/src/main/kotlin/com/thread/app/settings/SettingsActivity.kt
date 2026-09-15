@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -55,7 +56,7 @@ private val Accent = Color(0xFF7FB3D5)
 @Composable
 private fun SettingsScreen(onOpenAccessibilitySettings: () -> Unit) {
     Column(
-        modifier = Modifier.fillMaxSize().background(Bg).padding(24.dp),
+        modifier = Modifier.fillMaxSize().background(Bg).systemBarsPadding().padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text("Thread", color = OnSurface, fontSize = 28.sp, fontWeight = FontWeight.Bold)
