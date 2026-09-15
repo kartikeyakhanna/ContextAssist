@@ -113,6 +113,38 @@ arrived.
 
 ---
 
+## Screens nobody scored offline
+
+The cache only covers screens someone thought to score in advance, which is fine
+for a product you own and useless for whatever the user actually opens. So an
+unknown screen is measured live from the accessibility tree — `LiveFacts.facts()`
+counts options, editable fields, irreversible-looking buttons and cross-references,
+then runs them through the same maths as the offline agent.
+
+Order of trust, in `ThreadAccessibilityService.smlFor`:
+
+1. the design-time cache, where a model read the whole template
+2. a live measurement of the tree in front of us, computed once per screen
+3. `Sml.NEUTRAL`, only when the app exposes nothing readable
+
+Measured on stock apps with no integration: Android Settings home **20.2**, Clock
+**32.3**, against the hand-scored Expense Portal's **83.1**. The ordering is the
+point — it separates a calm screen from a punishing one with nobody having scored
+either in advance.
+
+This is the weaker measurement and is treated as such. The offline agent reads a
+template and can reason about meaning; this one counts what is on screen. Where
+they disagree, the cache wins.
+
+One heuristic bug is worth recording, because it shows the shape these bugs take.
+The first live run reported *progress visible* on the Settings home screen — the
+battery reads "85%". A bare percentage was matching as a progress indicator, which
+would have quietly told the engine that a screen offering no orientation at all
+was helping the user keep their place. Percentages now count only when a word like
+"complete" sits next to them.
+
+---
+
 ## Thresholds
 
 | Band | Action |

@@ -222,11 +222,14 @@ Stated plainly, because a demo that overclaims gets taken apart in Q&A.
   takes four interruptions and roughly eight minutes of cumulative absence to get
   there. No weight was changed to produce this. Whether four is the right number
   is a question for the co-design sessions, not for us.
-- **Task boundaries require Tier 2.** `startTask` fires from an SDK broadcast. On a
-  non-integrated app Thread observes interruptions but has no task to restore, so
-  Tier 1 coverage today is detection, not resumption. Inferring boundaries from
-  the node tree is possible; it is not implemented, and guessing wrong is worse
-  than not guessing.
+- **Intent requires Tier 2, and only intent.** On a non-integrated app Thread now
+  runs a Tier 1 session: it anchors to whatever the user opened, detects leaving
+  and returning, scores the screen live, and tracks orbiting. Verified on stock
+  Android Settings and Clock, neither of which knows Thread exists. What it
+  cannot know without integration is *what the user was trying to achieve* and
+  which fields they had filled — so a Tier 1 card describes only observed
+  behaviour, and never invents a goal. That last gap is not closable by cleverness:
+  an app has to say it.
 - **Excel's node tree is unverified.** `NodeTreeProbe` exists to answer this in a
   couple of hours. Interruption and return detection need only the package name,
   so the hero scenario stands either way.
