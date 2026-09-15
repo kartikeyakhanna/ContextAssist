@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  canRetrieveWindowContent is what gives Thread the node tree, which is how it
+  reads screen structure without any integration into the observed app.
+
+  Note the ordering of capability against scenario: detecting that the user left
+  and came back needs only the package name from a window-state change, so the
+  hero scenario works on literally any app, including ones whose content is a
+  custom-rendered canvas. Field-level signals need a richer tree and degrade
+  gracefully when an app does not expose one.
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged|typeViewFocused|typeViewClicked|typeViewScrolled|typeViewTextChanged|typeViewTextSelectionChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagReportViewIds|flagRetrieveInteractiveWindows|flagIncludeNotImportantViews"
+    android:canRetrieveWindowContent="true"
+    android:description="@string/service_description"
+    android:notificationTimeout="100"
+    android:settingsActivity="com.thread.app.settings.SettingsActivity" />

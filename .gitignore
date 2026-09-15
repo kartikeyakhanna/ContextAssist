@@ -1,0 +1,17 @@
+# Build output
+build/
+.gradle/
+*.apk
+
+# Local toolchain - downloaded, not source
+.tooling/
+
+# Local SDK path
+local.properties
+
+# IDE
+.idea/
+*.iml
+
+# Study data. Participant material never goes in version control.
+study/results/

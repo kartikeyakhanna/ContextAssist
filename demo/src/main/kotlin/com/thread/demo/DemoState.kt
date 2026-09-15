@@ -1,0 +1,73 @@
+package com.thread.demo
+
+/**
+ * The form, held in memory for the length of the demo.
+ *
+ * Deliberately not persisted. The point being made on stage is that the *app*
+ * remembers the data perfectly well - what nobody remembers is the person's
+ * place in the task. Draft-saving is not the problem Thread solves.
+ */
+object DemoState {
+
+    var purpose: String = ""
+    var destination: String = ""
+    var travelDates: String = ""
+
+    var costCentre: String = ""
+    var budgetCode: String = ""
+    var apportionment: String = ""
+    var attachments: String = ""
+
+    fun reset() {
+        purpose = ""
+        destination = ""
+        travelDates = ""
+        costCentre = ""
+        budgetCode = ""
+        apportionment = ""
+        attachments = ""
+    }
+
+    /**
+     * Twenty-five cost centres, unsorted, no search, no default.
+     *
+     * This is not a strawman. It is what an internal picker looks like when it
+     * is generated straight from a finance system, and by Hick's Law it is
+     * roughly a five-bit decision sitting in the middle of a form - which is
+     * exactly where the design-time score flags it.
+     */
+    val costCentres: List<String> = listOf(
+        "CC-1042 Corporate Services",
+        "CC-1043 Corporate Services (Shared)",
+        "CC-1101 Engineering - Platform",
+        "CC-1102 Engineering - Devices",
+        "CC-1103 Engineering - Cloud",
+        "CC-1104 Engineering - Security",
+        "CC-1201 Sales - EMEA",
+        "CC-1202 Sales - AMER",
+        "CC-1203 Sales - APAC",
+        "CC-1204 Sales - India",
+        "CC-1301 Marketing - Brand",
+        "CC-1302 Marketing - Field",
+        "CC-1303 Marketing - Digital",
+        "CC-1401 Finance - Controllership",
+        "CC-1402 Finance - Treasury",
+        "CC-1501 Legal - Commercial",
+        "CC-1502 Legal - Compliance",
+        "CC-1601 People - Talent",
+        "CC-1602 People - Benefits",
+        "CC-1701 Facilities - Campus",
+        "CC-1702 Facilities - Real Estate",
+        "CC-1801 Support - Tier 1",
+        "CC-1802 Support - Tier 2",
+        "CC-1901 Research - Applied",
+        "CC-1902 Research - Fundamental",
+    )
+
+    val apportionmentOptions: List<String> = listOf(
+        "Pro-rata by headcount",
+        "Pro-rata by revenue",
+        "Fixed percentage",
+        "Direct attribution",
+    )
+}

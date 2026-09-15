@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Thread</string>
+    <string name="service_label">Thread</string>
+    <string name="service_description">Thread keeps your place. When you are interrupted, it hands back what you were doing, so you do not have to rebuild it from scratch. Nothing you do is recorded or sent anywhere.</string>
+
+    <string name="resumption_title">Where you were</string>
+    <string name="resumption_done">Done</string>
+    <string name="resumption_decided">You chose</string>
+    <string name="resumption_next">Next</string>
+    <string name="action_got_it">Got it</string>
+    <string name="action_not_now">Not now</string>
+    <string name="action_never">Don\'t show this again</string>
+</resources>

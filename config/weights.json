@@ -1,0 +1,40 @@
+{
+  "_comment": "Every weight in Thread. Tunable live; nothing is hard-coded in a scorer. Weights within each score sum to 100.",
+
+  "sml.itemsToHold": 30,
+  "sml.decisionDensity": 20,
+  "sml.progressInvisibility": 15,
+  "sml.irreversibility": 15,
+  "sml.crossReference": 10,
+  "sml.languageComplexity": 10,
+
+  "cls.interruptionDuration": 25,
+  "cls.progressAtExit": 20,
+  "cls.cumulativeInterruptions": 20,
+  "cls.postReturnDisorientation": 20,
+  "cls.screenMemoryLoad": 15,
+
+  "orbit.hubRevisits": 25,
+  "orbit.repeatedError": 20,
+  "orbit.zeroProgressTime": 20,
+  "orbit.pathEntropy": 20,
+  "orbit.deadEndReturns": 15,
+
+  "freeze.dwellRatio": 30,
+  "freeze.scanWithoutCommit": 25,
+  "freeze.openCloseLoops": 20,
+  "freeze.decisionDensity": 15,
+  "freeze.irreversiblePresent": 10,
+
+  "initiation.zeroCommits": 30,
+  "initiation.focusWithoutEdit": 25,
+  "initiation.scatter": 20,
+  "initiation.screenMemoryLoad": 15,
+  "initiation.scrollReversal": 10,
+
+  "thresholds.passive": 30,
+  "thresholds.offer": 60,
+  "thresholds.commitHesitationSeconds": 8,
+  "thresholds.offerCooldownSeconds": 45,
+  "thresholds.dismissalsBeforeSilence": 2
+}

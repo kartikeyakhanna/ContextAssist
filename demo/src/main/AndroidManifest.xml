@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The app under observation.
+
+  Activity class names are load-bearing: the accessibility service derives a
+  screen id of "package/ClassName", and those ids are the keys in
+  config/complexity-cache.json. Renaming an activity orphans its design-time
+  Screen Memory Load score.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application
+        android:allowBackup="false"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Demo">
+
+        <activity
+            android:name=".Step1Details"
+            android:exported="true"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".Step2Allocation"
+            android:exported="false" />
+
+        <activity
+            android:name=".Step3Review"
+            android:exported="false" />
+
+    </application>
+</manifest>

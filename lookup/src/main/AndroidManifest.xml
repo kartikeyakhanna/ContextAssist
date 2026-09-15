@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  A separate application on purpose.
+
+  The pin scenario depends on the user genuinely leaving the expense app, and
+  "genuinely" means a different package - that is what the accessibility service
+  sees. A second screen inside the demo app would not reproduce the failure,
+  because the failure is that the phone can only show you one app at a time.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application
+        android:allowBackup="false"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Lookup">
+
+        <activity
+            android:name=".BudgetCodeLookup"
+            android:exported="true"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+    </application>
+</manifest>

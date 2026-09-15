@@ -1,0 +1,60 @@
+{
+  "_comment": "Design-time Screen Memory Load, produced offline by tools/complexity-agent. The engine looks these up; it never scores a screen at runtime. Unseen screens fall back to neutral (45) and are queued for offline scoring, so the cache self-warms.",
+  "_rubricVersion": "1.0",
+  "_model": "azure-openai, temperature 0, fixed rubric + 3 few-shot examples",
+
+  "screens": {
+    "com.thread.demo/Step1Details": {
+      "score": 18.4,
+      "factors": {
+        "itemsToHold": 1,
+        "optionCount": 3,
+        "progressVisible": true,
+        "irreversibleActions": 0,
+        "crossReferences": 0,
+        "languageComplexity": 0.15
+      },
+      "offendingElements": []
+    },
+
+    "com.thread.demo/Step2Allocation": {
+      "score": 83.1,
+      "factors": {
+        "itemsToHold": 8,
+        "optionCount": 25,
+        "progressVisible": false,
+        "irreversibleActions": 1,
+        "crossReferences": 3,
+        "languageComplexity": 0.7
+      },
+      "offendingElements": [
+        "Cost centre picker: 25 options, no default, no search",
+        "Budget code: must be looked up in another app",
+        "No indication of which of the 4 sections are mandatory",
+        "'Apportionment basis' - jargon, undefined on screen"
+      ]
+    },
+
+    "com.thread.demo/Step3Review": {
+      "score": 41.0,
+      "factors": {
+        "itemsToHold": 2,
+        "optionCount": 4,
+        "progressVisible": true,
+        "irreversibleActions": 1,
+        "crossReferences": 1,
+        "languageComplexity": 0.3
+      },
+      "offendingElements": [
+        "Submit is irreversible and does not say so"
+      ]
+    },
+
+    "com.microsoft.office.excel/SheetView": {
+      "score": 45.0,
+      "_note": "Neutral fallback. Excel renders the grid on a custom surface, so the accessibility tree is sparse here. Interruption and return detection is unaffected - it needs only the package name - which is why the hero scenario works on Excel regardless.",
+      "factors": {},
+      "offendingElements": []
+    }
+  }
+}
