@@ -63,16 +63,29 @@ class OverlayController(private val context: Context) {
         }
     }
 
-    fun show(offer: Offer, arbiter: Arbiter) {
+    fun show(
+        offer: Offer,
+        arbiter: Arbiter,
+        showTextInput: Boolean = false,
+        onTextSubmitted: (String) -> Unit = {},
+    ) {
         when (offer) {
             is Offer.Pin -> showPin(offer, arbiter)
-            else -> showCard(offer, arbiter)
+            else -> showCard(offer, arbiter, showTextInput, onTextSubmitted)
         }
     }
 
-    private fun showCard(offer: Offer, arbiter: Arbiter) {
+    private fun showCard(
+        offer: Offer,
+        arbiter: Arbiter,
+        showTextInput: Boolean,
+        onTextSubmitted: (String) -> Unit,
+    ) {
         hideCard()
-        cardView = composeOverlay(Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL) {
+        cardView = composeOverlay(
+            gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL,
+            focusable = showTextInput,
+        ) {
             ThreadSurface(
                 offer = offer,
                 onAccept = {
@@ -87,6 +100,8 @@ class OverlayController(private val context: Context) {
                     arbiter.record(offer.kind, OfferOutcome.SUPPRESSED, System.currentTimeMillis())
                     hideCard()
                 },
+                showTextInput = showTextInput,
+                onTextSubmitted = onTextSubmitted,
             )
         }
     }
@@ -98,7 +113,7 @@ class OverlayController(private val context: Context) {
      */
     private fun showPin(offer: Offer.Pin, arbiter: Arbiter) {
         hidePin()
-        pinView = composeOverlay(Gravity.BOTTOM or Gravity.END) {
+        pinView = composeOverlay(Gravity.BOTTOM or Gravity.END, focusable = false) {
             PinChip(
                 label = offer.label,
                 value = offer.value,
@@ -151,6 +166,7 @@ class OverlayController(private val context: Context) {
     @SuppressLint("InflateParams")
     private fun composeOverlay(
         gravity: Int,
+        focusable: Boolean = false,
         content: @androidx.compose.runtime.Composable () -> Unit,
     ): View {
         val owner = OverlayLifecycleOwner().apply { onCreate() }
@@ -162,14 +178,18 @@ class OverlayController(private val context: Context) {
             setContent { content() }
         }
 
+        val flags = WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+            if (focusable) {
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+            } else {
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+            }
+
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-            // NOT_FOCUSABLE is the important one: input passes straight through
-            // to the app underneath.
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            flags,
             PixelFormat.TRANSLUCENT,
         ).apply {
             this.gravity = gravity

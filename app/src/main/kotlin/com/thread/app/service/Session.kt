@@ -32,6 +32,9 @@ class Session(
     /** Live Screen Memory Load, per screen of this app. */
     val liveSml = HashMap<String, Double>()
 
+    /** Most recent text submitted from the resumption card, held in memory only. */
+    var latestSubmittedText: String? = null
+
     /** True once there is something worth restoring, rather than just a presence. */
     fun hasContext(): Boolean =
         OfferComposer.resumption(builder.state, triggeredBy = null).hasContent

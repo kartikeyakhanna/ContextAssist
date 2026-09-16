@@ -518,8 +518,16 @@ class ThreadAccessibilityService : AccessibilityService() {
     fun onDotTapped(now: Long) {
         val session = sessions.get(currentPackage ?: return) ?: return
         val offer = OfferComposer.resumption(session.builder.state, triggeredBy = null)
-        overlay.show(arbiter.userRequested(offer, now), arbiter)
+        overlay.show(
+            offer = arbiter.userRequested(offer, now),
+            arbiter = arbiter,
+            showTextInput = true,
+            onTextSubmitted = { text -> session.latestSubmittedText = text },
+        )
     }
+
+    fun latestSubmittedText(): String? =
+        currentPackage?.let { sessions.get(it)?.latestSubmittedText }
 
     /**
      * The dot is per-app, and it is shown only where there is something to pull.

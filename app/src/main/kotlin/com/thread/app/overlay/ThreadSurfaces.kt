@@ -13,12 +13,22 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.thread.engine.model.Offer
@@ -71,15 +81,55 @@ fun ThreadSurface(
     onAccept: () -> Unit,
     onDismiss: () -> Unit,
     onNever: () -> Unit,
+    showTextInput: Boolean = false,
+    onTextSubmitted: (String) -> Unit = {},
 ) {
     when (offer) {
-        is Offer.Resumption -> ResumptionCard(offer, onAccept, onDismiss, onNever)
+        is Offer.Resumption -> {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                ResumptionCard(offer, onAccept, onDismiss, onNever)
+                if (showTextInput) UserTextInputBar(onTextSubmitted)
+            }
+        }
         is Offer.Reassurance -> OneLineChip("${offer.consequence}. You can undo for ${offer.undoWindowSeconds / 60} minutes.", onDismiss)
         is Offer.ErrorExplanation -> OneLineChip(offer.message, onDismiss)
         is Offer.DefaultHint -> OneLineChip("${offer.suggestion}. ${offer.reversibility}.", onDismiss)
         is Offer.SequencingMode -> SequencingOffer(offer, onAccept, onDismiss)
         is Offer.Pin -> PinChip(offer.label, offer.value, onDismiss)
     }
+}
+
+@Composable
+private fun UserTextInputBar(onSubmit: (String) -> Unit) {
+    var text by remember { mutableStateOf("") }
+
+    fun submit() {
+        val submitted = text.trim()
+        if (submitted.isEmpty()) return
+        onSubmit(submitted)
+        text = ""
+    }
+
+    BasicTextField(
+        value = text,
+        onValueChange = { text = it },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+        keyboardActions = KeyboardActions(onSend = { submit() }),
+        textStyle = TextStyle(color = OnSurface, fontSize = 15.sp),
+        cursorBrush = SolidColor(Accent),
+        modifier = Modifier
+            .widthIn(max = 340.dp)
+            .fillMaxWidth()
+            .background(Surface, RoundedCornerShape(14.dp))
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        decorationBox = { innerTextField ->
+            if (text.isEmpty()) {
+                Text("Type a message...", color = Muted, fontSize = 15.sp)
+            }
+            innerTextField()
+        },
+    )
 }
 
 /**
