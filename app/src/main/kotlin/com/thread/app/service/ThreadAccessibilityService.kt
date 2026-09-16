@@ -10,6 +10,7 @@ import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityNodeInfo
 import com.thread.app.overlay.OverlayController
 import com.thread.engine.Arbiter
 import com.thread.engine.OfferComposer
@@ -18,6 +19,7 @@ import com.thread.engine.Triggers
 import com.thread.engine.Weights
 import com.thread.engine.model.AppSwitchAway
 import com.thread.engine.model.AppSwitchReturn
+import com.thread.engine.model.FieldCommit
 import com.thread.engine.model.ScreenView
 import com.thread.engine.model.ScrollReversal
 import com.thread.engine.model.ThreadEvent
@@ -48,26 +50,14 @@ class ThreadAccessibilityService : AccessibilityService() {
     /** Design-time Screen Memory Load, loaded from config/complexity-cache.json. */
     private var complexityCache: Map<String, Double> = emptyMap()
 
-    private var builder: TaskStateBuilder? = null
-    private var observedPackage: String? = null
-    private var awayAt: Long? = null
+    private val sessions = SessionStore()
 
-    /**
-     * True when the task was inferred from the user opening an app, rather than
-     * declared by an integrated one.
-     *
-     * The distinction is not cosmetic. An implicit session knows the user is in an
-     * app and can see when they leave it and come back; it does not know what they
-     * are trying to achieve, and it must not pretend to. A Tier 2 task always
-     * wins - see [startTask].
-     */
-    private var implicitTask = false
+    /** The app in front of the user right now. */
+    private var currentPackage: String? = null
 
-    /** Live Screen Memory Load for screens absent from the design-time cache. */
-    private val liveSml = HashMap<String, Double>()
+    /** Live Screen Memory Load is now held per session; see [Session.liveSml]. */
 
-    private val postReturn = PostReturnWatcher()
-    private val orbit = OrbitTracker()
+    private val textCapture = TextCapture { entry -> onTextCommitted(entry) }
 
     private val main = Handler(Looper.getMainLooper())
     private var sdkReceiver: SdkEventReceiver? = null
@@ -91,16 +81,21 @@ class ThreadAccessibilityService : AccessibilityService() {
     private val secondLookMs = 9_000L
 
     /**
-     * How long the user must be in a different app before an implicit session
-     * follows them to it.
+     * How many apps Thread will hold context for, and why there is a limit at all.
      *
-     * Below this, leaving is an interruption and they are coming back. Above it,
-     * they have moved on, and continuing to hold the first app's context would be
-     * both useless and a small betrayal of "we drop it the moment it stops being
-     * yours". Never applies to a Tier 2 task: an app that declared a task is the
-     * only thing that can end it.
+     * Not a memory constraint - these are small. It is that context the user has
+     * not touched in a long time is context they have moved on from, and holding
+     * it indefinitely would quietly turn an assistive feature into a log of
+     * everything they did today. See [SessionStore.evict].
      */
-    private val reanchorMs = 120_000L
+    private val heldApps = SessionStore.MAX_APPS
+
+    /** Slightly longer than the capture debounce, so the last keystroke lands. */
+    private val textFlushMs = 1_500L
+
+    /** Minimum gap between node-tree reads for the focused field. */
+    private val focusReadMs = 350L
+    private var lastFocusReadAt = 0L
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -117,7 +112,7 @@ class ThreadAccessibilityService : AccessibilityService() {
      */
     private fun registerSdkReceiver() {
         val receiver = SdkEventReceiver(
-            onEvent = { event -> applyEvent(event) },
+            onEvent = { event -> applyDeclaredEvent(event) },
             onTaskStart = { intent, pkg, screen -> startTask(intent, pkg, screen) },
             onTaskEnd = { endTask() },
         )
@@ -137,22 +132,117 @@ class ThreadAccessibilityService : AccessibilityService() {
         val now = System.currentTimeMillis()
         val pkg = e.packageName?.toString() ?: return
 
+        textCapture.flushIdle(now)
+
         when (e.eventType) {
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> onWindowChanged(pkg, e, now)
-            AccessibilityEvent.TYPE_VIEW_SCROLLED -> onScrolled(e, now)
+            AccessibilityEvent.TYPE_VIEW_SCROLLED -> onScrolled(pkg, e, now)
 
-            AccessibilityEvent.TYPE_VIEW_FOCUSED -> {
-                postReturn.onFocus(now)
-                orbit.onInteraction(now)
+            // Fires constantly, and is the only signal some apps give that the
+            // user is typing. Throttled rather than handled on every one.
+            AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED ->
+                if (SensitiveApps.readContent(pkg)) captureFocusedField(pkg, now)
+
+            AccessibilityEvent.TYPE_VIEW_FOCUSED -> sessions.get(pkg)?.let {
+                it.postReturn.onFocus(now)
+                it.orbit.onInteraction(now)
             }
 
-            AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
-            AccessibilityEvent.TYPE_VIEW_CLICKED,
-            -> {
-                postReturn.onProductiveAction(now)
-                orbit.onCommit(now)
+            AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED -> {
+                sessions.get(pkg)?.let {
+                    it.postReturn.onProductiveAction(now)
+                    it.orbit.onCommit(now)
+                }
+                // The trail. Only from apps whose contents Thread is allowed to read.
+                if (SensitiveApps.readContent(pkg)) {
+                    textCapture.onTextChanged(pkg, e, now)
+                    scheduleTextFlush()
+                }
+            }
+
+            AccessibilityEvent.TYPE_VIEW_CLICKED -> sessions.get(pkg)?.let {
+                it.postReturn.onProductiveAction(now)
+                it.orbit.onCommit(now)
             }
         }
+    }
+
+    /**
+     * An event from an integrated app, routed to that app's session.
+     *
+     * The broadcast carries no package, so it is attributed to the app in front
+     * of the user - which is the app that sent it, since a backgrounded app is
+     * not the one the user is filling in. Dropped rather than misattributed if
+     * there is no foreground session.
+     */
+    private fun applyDeclaredEvent(event: ThreadEvent) {
+        val session = sessions.get(currentPackage ?: return) ?: return
+        session.builder.apply(event)
+        refreshDot()
+    }
+
+    /**
+     * Read whatever field currently has input focus.
+     *
+     * Throttled hard. Content-changed fires dozens of times a second on a busy
+     * screen, and walking to the focused node on each one would make Thread the
+     * reason the user's phone feels slow - which for someone already struggling
+     * would be its own kind of harm.
+     */
+    private fun captureFocusedField(pkg: String, now: Long) {
+        if (now - lastFocusReadAt < focusReadMs) return
+        lastFocusReadAt = now
+
+        val focused = runCatching {
+            rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+        }.getOrNull() ?: return
+
+        textCapture.onFocusedNode(pkg, focused, now)
+        scheduleTextFlush()
+    }
+
+    /**
+     * Commit typing once it stops, on a timer of its own.
+     *
+     * The obvious implementation - flush when the next accessibility event arrives
+     * - never fires in the case that matters. Someone types a search, then stops
+     * and looks at it, and the platform goes quiet: no event, no flush, and the
+     * one thing they will want back is the one thing not recorded. So the flush
+     * has to be driven by the clock, not by the next thing to happen.
+     */
+    private fun scheduleTextFlush() {
+        main.removeCallbacksAndMessages(TEXT_TOKEN)
+        main.postAtTime(
+            { textCapture.flushIdle(System.currentTimeMillis()) },
+            TEXT_TOKEN,
+            SystemClock.uptimeMillis() + textFlushMs,
+        )
+    }
+
+    /**
+     * A field stopped changing. Record it as progress in that app's session.
+     *
+     * Note this is the same event type an integrated app sends through the SDK.
+     * Tier 1 and Tier 2 differ in how reliably the label is known, not in kind, so
+     * the card and every score treat them identically from here on.
+     */
+    private fun onTextCommitted(entry: TextCapture.Entry) {
+        val session = sessions.get(entry.packageName) ?: return
+        val now = System.currentTimeMillis()
+
+        Log.d(TAG, "captured: ${entry.packageName} ${entry.label}='${entry.value}'")
+
+        session.builder.apply(
+            FieldCommit(
+                ts = now,
+                screenId = session.builder.state.currentScreenId,
+                fieldId = entry.fieldId,
+                label = entry.label,
+                value = entry.value,
+                isDecision = false,
+            ),
+        )
+        refreshDot()
     }
 
     /**
@@ -170,50 +260,92 @@ class ThreadAccessibilityService : AccessibilityService() {
         // which on a phone is constant, and would bury the real signal entirely.
         if (isSystemSurface(pkg)) return
 
-        val tracked = observedPackage
-        if (tracked == null) {
-            // Tier 1. No app told us anything; the user opened something, and that
-            // is enough to start watching for them leaving it and coming back.
-            beginImplicitTask(pkg, screenIdOf(pkg, e))
-            return
-        }
-
-        val currentScreen = builder?.state?.currentScreenId ?: screenIdOf(pkg, e)
-
-        if (pkg != tracked) {
-            if (awayAt == null) {
-                awayAt = now
-                Log.d(TAG, "away -> $pkg")
-                applyEvent(AppSwitchAway(now, currentScreen, pkg))
-            } else if (implicitTask && now - (awayAt ?: now) > reanchorMs) {
-                Log.d(TAG, "re-anchoring: ${reanchorMs / 1000}s in $pkg, they have moved on")
-                beginImplicitTask(pkg, screenIdOf(pkg, e))
-                return
-            }
-            // Capture what they went to read, so it can be pinned when they get
-            // back. Re-checked on every screen in the other app, because the
-            // value is usually a tap or two in, not on the landing screen.
-            LookupDetector.capture(rootInActiveWindow)?.let {
-                applyEvent(it.at(now, currentScreen, pkg))
-            }
-            return
-        }
-
         val screenId = screenIdOf(pkg, e)
+        val previous = currentPackage
 
-        if (awayAt != null) {
-            val awaySeconds = (now - (awayAt ?: now)) / 1000
-            awayAt = null
-            Log.d(TAG, "return after ${awaySeconds}s onto $screenId")
-            postReturn.begin(now)
-            applyEvent(AppSwitchReturn(now, screenId, null))
-            scheduleReturnEvaluation()
-            return
+        if (previous != null && previous != pkg) {
+            onLeft(previous, pkg, now)
         }
 
-        applyEvent(ScreenView(now, screenId))
-        orbit.onScreen(screenId, now)
-        scheduleOrbitEvaluation()
+        currentPackage = pkg
+
+        val session = sessions.get(pkg) ?: openSession(pkg, screenId, now)
+        sessions.touch(pkg, now)
+
+        val awaySince = session.awayAt
+        if (awaySince != null) {
+            session.awayAt = null
+            Log.d(TAG, "return to $pkg after ${(now - awaySince) / 1000}s onto $screenId")
+            session.postReturn.begin(now)
+            session.builder.apply(AppSwitchReturn(now, screenId, null))
+            scheduleReturnEvaluation(pkg)
+        } else {
+            session.builder.apply(ScreenView(now, screenId))
+            session.orbit.onScreen(screenId, now)
+            scheduleOrbitEvaluation(pkg)
+        }
+
+        refreshDot()
+    }
+
+    /**
+     * The user has left an app for another one.
+     *
+     * Nothing about the app they left is discarded. That is the whole change: the
+     * session stays, marked away, so that whatever they were doing is still there
+     * when they come back - however many apps they visit in between.
+     */
+    private fun onLeft(fromPackage: String, toPackage: String, now: Long) {
+        // Whatever they were part-way through typing, keep it. They did not stop
+        // because they had finished.
+        textCapture.flushAll()
+
+        val session = sessions.get(fromPackage) ?: return
+        if (session.awayAt != null) return
+
+        session.awayAt = now
+        Log.d(TAG, "away from $fromPackage -> $toPackage")
+        session.builder.apply(
+            AppSwitchAway(now, session.builder.state.currentScreenId, toPackage),
+        )
+
+        // Capture what they went to read, so it can be pinned when they get back.
+        LookupDetector.capture(rootInActiveWindow)?.let {
+            session.builder.apply(it.at(now, session.builder.state.currentScreenId, toPackage))
+        }
+    }
+
+    /**
+     * Start watching an app the user has just opened.
+     *
+     * Deliberately unconditional: every app gets a session, including ones whose
+     * contents Thread will never read. Knowing that somebody stepped away to their
+     * banking app is what makes the interruption visible, and it requires only the
+     * package name.
+     */
+    private fun openSession(pkg: String, screenId: String, now: Long): Session {
+        val session = Session(
+            packageName = pkg,
+            builder = TaskStateBuilder(
+                taskId = UUID.randomUUID().toString(),
+                intent = appLabel(pkg),
+                startScreenId = screenId,
+                startedAt = now,
+            ),
+            declared = false,
+            lastSeenAt = now,
+        )
+        sessions.put(session)
+
+        val dropped = sessions.evict()
+        if (dropped.isNotEmpty()) Log.d(TAG, "evicted: $dropped")
+
+        Log.d(
+            TAG,
+            "session opened: $pkg screen=$screenId " +
+                "readsContent=${SensitiveApps.readContent(pkg)} held=${sessions.all().size}",
+        )
+        return session
     }
 
     /**
@@ -224,11 +356,11 @@ class ThreadAccessibilityService : AccessibilityService() {
      * they had got to, and stall a beat later. A single check would miss whichever
      * case it was not timed for.
      */
-    private fun scheduleReturnEvaluation() {
+    private fun scheduleReturnEvaluation(pkg: String) {
         main.removeCallbacksAndMessages(RETURN_TOKEN)
         listOf(firstLookMs, secondLookMs).forEach { delay ->
             main.postAtTime(
-                { evaluateAfterReturn(System.currentTimeMillis()) },
+                { evaluateAfterReturn(pkg, System.currentTimeMillis()) },
                 RETURN_TOKEN,
                 SystemClock.uptimeMillis() + delay,
             )
@@ -236,29 +368,25 @@ class ThreadAccessibilityService : AccessibilityService() {
     }
 
     /** Debounced: orbiting is a pattern over time, not a single navigation. */
-    private fun scheduleOrbitEvaluation() {
+    private fun scheduleOrbitEvaluation(pkg: String) {
         main.removeCallbacksAndMessages(ORBIT_TOKEN)
         main.postAtTime(
-            { evaluateOrbit(System.currentTimeMillis()) },
+            { evaluateOrbit(pkg, System.currentTimeMillis()) },
             ORBIT_TOKEN,
             SystemClock.uptimeMillis() + 1_500L,
         )
     }
 
-    private fun onScrolled(e: AccessibilityEvent, now: Long) {
+    private fun onScrolled(pkg: String, e: AccessibilityEvent, now: Long) {
         // Note: Jetpack Compose surfaces emit no TYPE_VIEW_SCROLLED at all, so this
         // never runs on a Compose UI. Verified on device; see docs/scoring.md.
-        val down = scrollingDown(e)
-        if (down == null) {
-            Log.d(TAG, "scroll ignored - no usable delta (deltaY=${runCatching { e.scrollDeltaY }.getOrNull()})")
-            return
-        }
-        if (!orbit.isReversal(down, now)) return
+        val session = sessions.get(pkg) ?: return
+        val down = scrollingDown(e) ?: return
+        if (!session.orbit.isReversal(down, now)) return
 
-        Log.d(TAG, "scroll reversal (now heading ${if (down) "down" else "up"})")
-        val screen = builder?.state?.currentScreenId ?: return
-        applyEvent(ScrollReversal(now, screen))
-        postReturn.onScrollReversal()
+        Log.d(TAG, "scroll reversal in $pkg (now heading ${if (down) "down" else "up"})")
+        session.builder.apply(ScrollReversal(now, session.builder.state.currentScreenId))
+        session.postReturn.onScrollReversal()
     }
 
     /**
@@ -289,9 +417,9 @@ class ThreadAccessibilityService : AccessibilityService() {
      * the better measurement and wins. Live scoring exists to stop unknown screens
      * being scored as average, not to second-guess the scored ones.
      */
-    private fun smlFor(screenId: String): Double {
+    private fun smlFor(session: Session, screenId: String): Double {
         complexityCache[screenId]?.let { return it }
-        liveSml[screenId]?.let { return it }
+        session.liveSml[screenId]?.let { return it }
 
         val nodes = LiveComplexity.flatten(rootInActiveWindow)
         if (nodes.isEmpty()) {
@@ -301,7 +429,7 @@ class ThreadAccessibilityService : AccessibilityService() {
 
         val facts = LiveFacts.facts(screenId, nodes)
         val value = Sml.score(facts, weights).value
-        liveSml[screenId] = value
+        session.liveSml[screenId] = value
 
         Log.d(
             TAG,
@@ -316,17 +444,18 @@ class ThreadAccessibilityService : AccessibilityService() {
      * Runs shortly after the user comes back, once there is enough evidence to
      * tell reorientation from ordinary resumption.
      */
-    fun evaluateAfterReturn(now: Long) {
-        val state = builder?.state ?: return
-        val sml = smlFor(state.currentScreenId)
-        val cls = Cls.score(state, postReturn.signals(now), sml, weights)
+    fun evaluateAfterReturn(pkg: String, now: Long) {
+        val session = sessions.get(pkg) ?: return
+        val state = session.builder.state
+        val sml = smlFor(session, state.currentScreenId)
+        val cls = Cls.score(state, session.postReturn.signals(now), sml, weights)
 
-        Log.d(TAG, "afterReturn: sml=$sml cls=${cls.value.toInt()} factors=${cls.factors}")
+        Log.d(TAG, "afterReturn[$pkg]: sml=$sml cls=${cls.value.toInt()} factors=${cls.factors}")
 
         val evaluation = Triggers.evaluate(
             state = state,
             cls = cls,
-            orbit = DsOrbit.score(state, orbit.signals(now), weights),
+            orbit = DsOrbit.score(state, session.orbit.signals(now), weights),
             justReturned = true,
             w = weights,
         )
@@ -338,14 +467,15 @@ class ThreadAccessibilityService : AccessibilityService() {
      * The other half. Someone who never left the app can still be lost inside it -
      * going back and forth to a screen because they cannot hold what is on it.
      */
-    fun evaluateOrbit(now: Long) {
-        val state = builder?.state ?: return
-        val sml = smlFor(state.currentScreenId)
+    fun evaluateOrbit(pkg: String, now: Long) {
+        val session = sessions.get(pkg) ?: return
+        val state = session.builder.state
+        val sml = smlFor(session, state.currentScreenId)
 
         val evaluation = Triggers.evaluate(
             state = state,
-            cls = Cls.score(state, postReturn.signals(now), sml, weights),
-            orbit = DsOrbit.score(state, orbit.signals(now), weights),
+            cls = Cls.score(state, session.postReturn.signals(now), sml, weights),
+            orbit = DsOrbit.score(state, session.orbit.signals(now), weights),
             justReturned = false,
             w = weights,
         )
@@ -382,13 +512,26 @@ class ThreadAccessibilityService : AccessibilityService() {
      * no recall, no phrasing, no deciding what to ask for.
      */
     fun onDotTapped(now: Long) {
-        val state = builder?.state ?: return
-        val offer = OfferComposer.resumption(state, triggeredBy = null)
+        val session = sessions.get(currentPackage ?: return) ?: return
+        val offer = OfferComposer.resumption(session.builder.state, triggeredBy = null)
         overlay.show(arbiter.userRequested(offer, now), arbiter)
     }
 
-    private fun applyEvent(event: ThreadEvent) {
-        builder?.apply(event)
+    /**
+     * The dot is per-app, and it is shown only where there is something to pull.
+     *
+     * An app Thread has nothing on gets no dot, because a dot that opens an empty
+     * card teaches the user that tapping it is not worth it - and the tap is the
+     * one interaction this whole design depends on being trusted.
+     */
+    private fun refreshDot() {
+        if (!::overlay.isInitialized) return
+        val session = sessions.get(currentPackage ?: return)
+        if (session != null && session.hasContext) {
+            overlay.showDot { onDotTapped(System.currentTimeMillis()) }
+        } else {
+            overlay.hide()
+        }
     }
 
     /**
@@ -399,53 +542,30 @@ class ThreadAccessibilityService : AccessibilityService() {
      * loses the very decisions worth restoring, and one that never ends holds
      * context it has no business holding. So an integrated app states them.
      *
-     * Without integration Thread still runs - see [beginImplicitTask] - it just
-     * observes behaviour instead of restoring content.
+     * Without integration Thread still runs - every app gets an inferred session
+     * - it just observes behaviour instead of restoring declared content.
      */
     fun startTask(intent: String, packageName: String, screenId: String) {
         Log.d(TAG, "startTask: '$intent' pkg=$packageName screen=$screenId")
-        implicitTask = false
-        beginTask(intent, packageName, screenId)
+
+        sessions.put(
+            Session(
+                packageName = packageName,
+                builder = TaskStateBuilder(
+                    taskId = UUID.randomUUID().toString(),
+                    intent = intent,
+                    startScreenId = screenId,
+                    startedAt = System.currentTimeMillis(),
+                ),
+                declared = true,
+                lastSeenAt = System.currentTimeMillis(),
+            ),
+        )
+        currentPackage = packageName
 
         // The dot appears only while a task is open, and it is the only thing
         // Thread ever shows unprompted.
         overlay.showDot { onDotTapped(System.currentTimeMillis()) }
-    }
-
-    /**
-     * Tier 1 session. Starts because an app came to the foreground, nothing more.
-     *
-     * What this buys: interruption and return detection, screen complexity, orbit
-     * detection - everything that comes from watching behaviour. What it cannot
-     * buy is intent, so the task is named after the app and the card says only
-     * what was actually observed. The alternative, inventing a plausible-sounding
-     * goal, would put words in the user's mouth at the exact moment they are least
-     * able to tell that they are wrong.
-     *
-     * No dot. An implicit session has no restored context worth pulling, so
-     * offering a way to pull it would be a lie. It becomes visible only if the
-     * user's own behaviour says they are struggling.
-     */
-    private fun beginImplicitTask(packageName: String, screenId: String) {
-        Log.d(TAG, "implicit session: pkg=$packageName screen=$screenId")
-        implicitTask = true
-        beginTask(appLabel(packageName), packageName, screenId)
-        if (::overlay.isInitialized) overlay.hide()
-    }
-
-    private fun beginTask(intent: String, packageName: String, screenId: String) {
-        observedPackage = packageName
-        awayAt = null
-        orbit.reset()
-        postReturn.clear()
-        liveSml.clear()
-
-        builder = TaskStateBuilder(
-            taskId = UUID.randomUUID().toString(),
-            intent = intent,
-            startScreenId = screenId,
-            startedAt = System.currentTimeMillis(),
-        )
     }
 
     /** "what you were doing in Excel" reads better than a package name. */
@@ -458,18 +578,34 @@ class ThreadAccessibilityService : AccessibilityService() {
         return "what you were doing in $label"
     }
 
-    /** Task over. Everything about it is dropped, immediately and completely. */
-    fun endTask() {
-        Log.d(TAG, "endTask - dropping all task state")
+    /**
+     * Task over. Everything about *that app* is dropped, immediately.
+     *
+     * Scoped to the package on purpose. An integrated app finishing its task is
+     * not a statement about the four other apps the user has open, and wiping
+     * them would throw away context nobody asked to be rid of.
+     */
+    fun endTask(packageName: String? = null) {
+        val target = packageName ?: currentPackage
+        if (target == null) {
+            Log.d(TAG, "endTask - no app in view, nothing to drop")
+            return
+        }
+        Log.d(TAG, "endTask - dropping session for $target")
         main.removeCallbacksAndMessages(RETURN_TOKEN)
         main.removeCallbacksAndMessages(ORBIT_TOKEN)
-        builder = null
-        observedPackage = null
-        implicitTask = false
-        awayAt = null
-        orbit.reset()
-        postReturn.clear()
-        liveSml.clear()
+        textCapture.forget(target)
+        sessions.remove(target)
+        refreshDot()
+    }
+
+    /** Opt-out, or shutdown. Everything, everywhere, gone. */
+    private fun dropEverything() {
+        main.removeCallbacksAndMessages(RETURN_TOKEN)
+        main.removeCallbacksAndMessages(ORBIT_TOKEN)
+        sessions.clear()
+        textCapture.clear()
+        currentPackage = null
         if (::overlay.isInitialized) overlay.hide()
     }
 
@@ -488,7 +624,7 @@ class ThreadAccessibilityService : AccessibilityService() {
     }
 
     override fun onDestroy() {
-        endTask()
+        dropEverything()
         sdkReceiver?.let { runCatching { unregisterReceiver(it) } }
         sdkReceiver = null
         super.onDestroy()
@@ -525,5 +661,6 @@ class ThreadAccessibilityService : AccessibilityService() {
         const val TAG = "Thread"
         val RETURN_TOKEN = Any()
         val ORBIT_TOKEN = Any()
+        val TEXT_TOKEN = Any()
     }
 }

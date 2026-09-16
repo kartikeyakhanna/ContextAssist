@@ -33,6 +33,44 @@ class OfferComposerTest {
     )
 
     @Test
+    fun `a single captured field shows what was typed, not the field name`() {
+        val offer = OfferComposer.resumption(
+            state(
+                completed = listOf(
+                    FieldSnapshot("omnibox", "Search or type URL", "ramp grant form", 1L),
+                ),
+            ),
+            triggeredBy = null,
+        )
+
+        assertEquals(
+            "You typed \"ramp grant form\"",
+            offer.done,
+            "One field is a search. 'Entered Search or type URL' restores nothing - " +
+                "the query is the only part the user actually lost.",
+        )
+    }
+
+    @Test
+    fun `several fields are described by label, so values are not put on screen`() {
+        val offer = OfferComposer.resumption(
+            state(
+                completed = listOf(
+                    FieldSnapshot("a", "Claim amount", "4820.00", 1L),
+                    FieldSnapshot("b", "Cost centre", "GB-4471", 2L),
+                ),
+            ),
+            triggeredBy = null,
+        )
+
+        assertEquals("Entered Claim amount, Cost centre", offer.done)
+        assertTrue(
+            !offer.done!!.contains("4820"),
+            "A form's values stay in its fields. The card is read in public.",
+        )
+    }
+
+    @Test
     fun `an app that reports nothing produces no Done line at all`() {
         val offer = OfferComposer.resumption(state(), triggeredBy = null)
 

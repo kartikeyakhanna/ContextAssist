@@ -48,6 +48,19 @@ decline.
 
 One offer at a time. Never stacked. Never auto-dismissed. Always dismissible for good.
 
+**Context is held per app, not one app at a time.** A phone is not used one task at
+a time: you are mid-claim, you check a budget code, you search for something, you
+answer a message. Each of those is a separate thread to lose, so each gets its own
+session. Five apps are held at once — enough to cover a realistic interruption
+chain, and small enough that the answer to *"what are you keeping?"* stays short.
+
+**Some apps are watched but never read.** Interruption tracking needs only a
+package name and betrays nothing, so it runs everywhere. Reading screen contents is
+what makes a memory aid into a record of somebody's bank balance or their
+diagnosis, so banking, health, messaging and identity apps are content-gated by
+`SensitiveApps`. Thread will note that you stepped away to your banking app; it
+will not note what it said.
+
 ---
 
 ## Two principles that shape everything
@@ -230,6 +243,18 @@ Stated plainly, because a demo that overclaims gets taken apart in Q&A.
   which fields they had filled — so a Tier 1 card describes only observed
   behaviour, and never invents a goal. That last gap is not closable by cleverness:
   an app has to say it.
+- **Text capture cannot rely on text-change events.** The obvious implementation
+  listens for `TYPE_VIEW_TEXT_CHANGED`. Measured on device, Chrome's omnibox emits
+  **none at all** while you type — only `TYPE_WINDOW_CONTENT_CHANGED`. An
+  implementation built on text-change events therefore works on well-behaved apps
+  and silently captures nothing on the rest, which is worse than failing outright
+  because it looks like it works. Thread instead reads the input-focused node from
+  the tree, throttled to one read per 350 ms, and commits the value once typing
+  stops. Verified capturing a Chrome search across two intervening apps.
+- **An empty field reports its own hint as its text.** Before this was caught, the
+  card read *"Entered Search or type URL"* for a box the user had never typed in —
+  a confident, plausible, invented memory handed to the person least able to
+  contradict it. Values matching the field's hint are now discarded.
 - **Excel's node tree is unverified.** `NodeTreeProbe` exists to answer this in a
   couple of hours. Interruption and return detection need only the package name,
   so the hero scenario stands either way.

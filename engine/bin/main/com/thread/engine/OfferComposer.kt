@@ -39,11 +39,23 @@ object OfferComposer {
      * not mean the user achieved nothing. Saying so to someone who has just lost
      * their place, and who may not be certain what they did, risks them believing
      * it. So the line is omitted.
+     *
+     * One field and several fields are described differently, on purpose:
+     *
+     * - One field is almost always a lookup or a search, and the label alone
+     *   ("Entered Search or type URL") tells the user nothing they did not
+     *   already know. What they lost is the *query*, so the query is shown.
+     * - Several fields is a form, and there the labels are the map: they say how
+     *   far down the thing the user had got. Echoing every value would put a
+     *   salary or a claim amount on screen to be read over a shoulder, and buy
+     *   nothing, because the values are still sitting in the fields behind it.
      */
     private fun describeDone(state: TaskState): String? {
-        val labels = state.completed.map { it.label }.distinct()
+        val fields = state.completed
+        val labels = fields.map { it.label }.distinct()
         return when {
-            labels.isEmpty() -> null
+            fields.isEmpty() -> null
+            fields.size == 1 -> "You typed \"${fields.first().value.take(60)}\""
             labels.size <= 3 -> "Entered " + labels.joinToString(", ")
             else -> "Entered " + labels.take(2).joinToString(", ") +
                 " and ${labels.size - 2} more"
