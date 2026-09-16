@@ -2,7 +2,9 @@ package com.thread.app.service
 
 import android.accessibilityservice.AccessibilityService
 import android.content.Context
+import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -64,6 +66,7 @@ class ThreadAccessibilityService : AccessibilityService() {
 
     /** Resolved once the service connects; see [isSystemSurface]. */
     private var imePackage: String? = null
+    private var launcherPackages: Set<String> = emptySet()
 
     private val alwaysIgnoredPackages = setOf(
         "com.android.systemui",
@@ -102,6 +105,7 @@ class ThreadAccessibilityService : AccessibilityService() {
         overlay = OverlayController(this)
         complexityCache = ComplexityCache.load(this)
         refreshImePackage()
+        resolveLauncherPackages()
         registerSdkReceiver()
     }
 
@@ -527,7 +531,7 @@ class ThreadAccessibilityService : AccessibilityService() {
     private fun refreshDot() {
         if (!::overlay.isInitialized) return
         val session = sessions.get(currentPackage ?: return)
-        if (session != null && session.hasContext) {
+        if (session != null && session.hasContext()) {
             overlay.showDot { onDotTapped(System.currentTimeMillis()) }
         } else {
             overlay.hide()
@@ -647,7 +651,35 @@ class ThreadAccessibilityService : AccessibilityService() {
     private fun isSystemSurface(pkg: String): Boolean =
         pkg == packageName ||
             pkg in alwaysIgnoredPackages ||
-            pkg == imePackage
+            pkg == imePackage ||
+            pkg in launcherPackages
+
+    /**
+     * The home screen is a corridor, not a room.
+     *
+     * Almost every app switch on Android passes through the launcher, so giving it
+     * a session of its own produced lines like "return to the launcher after 35
+     * seconds" - which describes nothing a user has ever lost. Leaving an app *via*
+     * the launcher is still an interruption of that app, and is still recorded;
+     * what stops is pretending the launcher was somewhere you were working.
+     *
+     * Resolving this with `resolveActivity` is a trap, and cost a regression before
+     * it was caught in the log: on a device with no default launcher set, the
+     * platform answers with `com.android.settings/.FallbackHome`, and Thread
+     * silently stopped watching Settings altogether. Every home candidate is
+     * collected instead, and Settings is never treated as one - a real launcher is
+     * not going to be shipped inside it.
+     */
+    private fun resolveLauncherPackages() {
+        launcherPackages = runCatching {
+            val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+            packageManager.queryIntentActivities(home, 0)
+                .map { it.activityInfo.packageName }
+                .filterNot { it == "com.android.settings" }
+                .toSet()
+        }.getOrDefault(emptySet())
+        Log.d(TAG, "ignoring launcher packages: $launcherPackages")
+    }
 
     private fun refreshImePackage() {
         imePackage = runCatching {

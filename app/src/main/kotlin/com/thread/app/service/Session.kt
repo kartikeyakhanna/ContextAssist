@@ -1,5 +1,6 @@
 package com.thread.app.service
 
+import com.thread.engine.OfferComposer
 import com.thread.engine.TaskStateBuilder
 
 /**
@@ -32,8 +33,8 @@ class Session(
     val liveSml = HashMap<String, Double>()
 
     /** True once there is something worth restoring, rather than just a presence. */
-    val hasContext: Boolean
-        get() = declared || builder.state.completed.isNotEmpty()
+    fun hasContext(): Boolean =
+        OfferComposer.resumption(builder.state, triggeredBy = null).hasContent
 }
 
 /**

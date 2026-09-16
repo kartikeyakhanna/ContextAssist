@@ -31,6 +31,24 @@ sealed interface Offer {
         override val triggeredBy: Score?,
     ) : Offer {
         override val kind get() = OfferKind.RESUMPTION
+
+        /**
+         * True when the card would say something beyond naming the app.
+         *
+         * The dot is driven by this rather than by a parallel rule, so the two
+         * cannot drift apart. The invariant that matters: tapping the dot must
+         * never produce a card that only restates which app you are in. That tap
+         * is the one interaction this whole design asks the user to trust, and a
+         * tap that yields nothing teaches them not to bother - at which point the
+         * push path is all that remains, which is the thing they least need.
+         *
+         * Note what does count: having been away. Thread need not have read a
+         * single field to tell someone they left this app twenty minutes ago and
+         * have been back and forth six times since. For a person who has lost
+         * their place that is often the most orientating thing available.
+         */
+        val hasContent: Boolean
+            get() = done != null || decided != null || next != null || awayFor != null
     }
 
     /** C1: working-memory prosthetic. The value they keep leaving to fetch. */

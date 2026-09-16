@@ -63,20 +63,51 @@ object OfferComposer {
     }
 
     /**
-     * How long they were gone. Available without any integration at all, and for
-     * someone who has lost the thread entirely it is often the most orientating
-     * thing on the card: it tells them whether they stepped away or lost an hour.
+     * How long they were gone, and how often.
+     *
+     * Available without any integration at all, and for someone who has lost the
+     * thread entirely it is often the most orientating thing on the card: it tells
+     * them whether they stepped away or lost an hour.
+     *
+     * Reporting only the *last* absence was wrong, and wrong in a way that hid the
+     * worst case. Someone who has been in and out of an app seven times, with a
+     * four-minute gap in the middle, most likely left it three seconds ago - so the
+     * last gap is the least informative one available, and using it meant the card
+     * fell silent exactly when the user was most scattered. The longest gap and the
+     * number of trips are both reported instead.
      */
     private fun describeAway(state: TaskState): String? {
-        val last = state.interruptions.lastOrNull() ?: return null
-        val seconds = last.durationSeconds
-        if (seconds < 30) return null
+        val interruptions = state.interruptions
+        if (interruptions.isEmpty()) return null
 
-        val minutes = (seconds / 60).toInt()
+        val trips = interruptions.size
+        val longest = interruptions.maxOf { it.durationSeconds }
+
+        // Nothing worth saying: one glance away, and no pattern of them.
+        if (longest < 30 && trips < 3) return null
+
+        val gap = describeGap(longest)
         return when {
-            minutes < 1 -> "You were away for under a minute"
-            minutes == 1 -> "You were away for a minute"
-            else -> "You were away for $minutes minutes"
+            trips < 3 -> "You were away for $gap"
+            longest < 30 -> "You have been in and out of this $trips times"
+            else -> "You have been in and out $trips times, the longest for $gap"
+        }
+    }
+
+    private fun describeGap(seconds: Double): String {
+        // Rounded, not truncated. Three minutes fifty-nine seconds is four minutes
+        // to anyone who lived through it, and reading "3 minutes" back to someone
+        // checking whether they lost track of time makes the card feel wrong in a
+        // way they cannot articulate - which costs trust that is hard to win back.
+        val minutes = Math.round(seconds / 60.0).toInt()
+        return when {
+            seconds < 60 -> "under a minute"
+            minutes <= 1 -> "a minute"
+            minutes < 60 -> "$minutes minutes"
+            else -> {
+                val hours = minutes / 60
+                if (hours == 1) "over an hour" else "over $hours hours"
+            }
         }
     }
 

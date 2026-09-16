@@ -102,6 +102,50 @@ class OfferComposerTest {
     }
 
     @Test
+    fun `the longest gap is reported, not the most recent one`() {
+        val offer = OfferComposer.resumption(
+            state(
+                interruptions = listOf(
+                    Interruption(0L, 40_000L, 0.0, "com.settings"),
+                    Interruption(1L, 240_000L, 0.0, "com.teams"),
+                    Interruption(2L, 3_000L, 0.0, "com.clock"),
+                ),
+            ),
+            triggeredBy = null,
+        )
+
+        assertEquals("You have been in and out 3 times, the longest for 4 minutes", offer.awayFor)
+        assertTrue(
+            offer.hasContent,
+            "Nothing was read from this app, but having been away four minutes is " +
+                "still worth a dot - it is the most orientating fact available.",
+        )
+    }
+
+    @Test
+    fun `being in and out repeatedly counts even when each trip is brief`() {
+        val offer = OfferComposer.resumption(
+            state(
+                interruptions = (1..6).map { Interruption(it.toLong(), 5_000L, 0.0, "com.x") },
+            ),
+            triggeredBy = null,
+        )
+
+        assertEquals("You have been in and out of this 6 times", offer.awayFor)
+    }
+
+    @Test
+    fun `a card with nothing to say is marked as such, so no dot is shown`() {
+        val offer = OfferComposer.resumption(state(), triggeredBy = null)
+
+        assertTrue(
+            !offer.hasContent,
+            "Naming the app the user is already looking at restores nothing. A tap " +
+                "that yields an empty card teaches them not to tap again.",
+        )
+    }
+
+    @Test
     fun `an integrated app still gets the full card`() {
         val offer = OfferComposer.resumption(
             state(
