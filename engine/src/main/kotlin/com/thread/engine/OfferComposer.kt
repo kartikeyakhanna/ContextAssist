@@ -27,16 +27,44 @@ object OfferComposer {
             done = describeDone(state),
             decided = describeDecisions(state.decisions),
             next = state.nextAction,
+            awayFor = describeAway(state),
             triggeredBy = triggeredBy,
         )
 
-    private fun describeDone(state: TaskState): String {
+    /**
+     * Null when nothing was observed, rather than "Nothing filled in yet".
+     *
+     * Thread only sees field-level progress in an app that reports it. On every
+     * other app an empty list means *we were not watching that closely* - it does
+     * not mean the user achieved nothing. Saying so to someone who has just lost
+     * their place, and who may not be certain what they did, risks them believing
+     * it. So the line is omitted.
+     */
+    private fun describeDone(state: TaskState): String? {
         val labels = state.completed.map { it.label }.distinct()
         return when {
-            labels.isEmpty() -> "Nothing filled in yet"
+            labels.isEmpty() -> null
             labels.size <= 3 -> "Entered " + labels.joinToString(", ")
             else -> "Entered " + labels.take(2).joinToString(", ") +
                 " and ${labels.size - 2} more"
+        }
+    }
+
+    /**
+     * How long they were gone. Available without any integration at all, and for
+     * someone who has lost the thread entirely it is often the most orientating
+     * thing on the card: it tells them whether they stepped away or lost an hour.
+     */
+    private fun describeAway(state: TaskState): String? {
+        val last = state.interruptions.lastOrNull() ?: return null
+        val seconds = last.durationSeconds
+        if (seconds < 30) return null
+
+        val minutes = (seconds / 60).toInt()
+        return when {
+            minutes < 1 -> "You were away for under a minute"
+            minutes == 1 -> "You were away for a minute"
+            else -> "You were away for $minutes minutes"
         }
     }
 

@@ -107,9 +107,10 @@ fun ResumptionCard(
         Text("Where you were", color = Muted, fontSize = 13.sp)
         Text(offer.intent, color = OnSurface, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
 
-        Line("Done", offer.done)
+        offer.done?.let { Line("Done", it) }
         offer.decided?.let { Line("You chose", it) }
         offer.next?.let { Line("Next", it) }
+        offer.awayFor?.let { Text(it, color = Muted, fontSize = 13.sp) }
 
         Row(
             modifier = Modifier.fillMaxWidth().padding(top = 6.dp),

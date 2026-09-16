@@ -22,7 +22,7 @@ import kotlin.test.assertTrue
 class ArbiterTest {
 
     private fun offer(kind: OfferKind): Offer = when (kind) {
-        OfferKind.RESUMPTION -> Offer.Resumption("Claim", "Entered dates", null, "Attach receipt", null)
+        OfferKind.RESUMPTION -> Offer.Resumption("Claim", "Entered dates", null, "Attach receipt", null, null)
         OfferKind.PIN -> Offer.Pin("Budget code", "DEL-4471", null)
         else -> Offer.Reassurance("Goes to your manager", 600, null)
     }
@@ -225,8 +225,9 @@ class MayaScenarioTest {
         val card = assertIs<Offer.Resumption>(chosen)
 
         assertEquals("Submitting Q3 travel claim", card.intent)
-        assertTrue(card.done.contains("Travel dates"), "got: ${card.done}")
-        assertTrue(card.done.contains("Amount"), "got: ${card.done}")
+        assertNotNull(card.done)
+        assertTrue(card.done!!.contains("Travel dates"), "got: ${card.done}")
+        assertTrue(card.done!!.contains("Amount"), "got: ${card.done}")
         assertEquals("Attach the receipt", card.next)
         assertNotNull(card.decided)
         assertTrue(card.decided.contains("Delhi"), "the why must survive, not just the what")

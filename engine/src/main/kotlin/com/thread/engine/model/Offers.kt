@@ -11,12 +11,23 @@ sealed interface Offer {
     val kind: OfferKind
     val triggeredBy: Score?
 
-    /** S5 / S1: restore the thread after an interruption. The hero. */
+    /**
+     * S5 / S1: restore the thread after an interruption. The hero.
+     *
+     * [done], [decided] and [next] are all nullable because they come from an app
+     * that chose to describe its own task. Without that, Thread still knows the
+     * user left and came back, and how long for - and a card that says only that
+     * is honest. One that fills the gap with "Nothing filled in yet" would be
+     * telling someone who had been working for ten minutes that they had done
+     * nothing, which is worse than silence.
+     */
     data class Resumption(
         val intent: String,
-        val done: String,
+        val done: String?,
         val decided: String?,
         val next: String?,
+        /** "You were away for 4 minutes" - all Tier 1 can offer, and not nothing. */
+        val awayFor: String? = null,
         override val triggeredBy: Score?,
     ) : Offer {
         override val kind get() = OfferKind.RESUMPTION
