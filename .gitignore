@@ -15,3 +15,9 @@ local.properties
 
 # Study data. Participant material never goes in version control.
 study/results/
+
+# Scratch screencaps from emulator runs. Deliberate pitch images live in
+# docs/images/ and are committed by name; anything at the root is a working
+# file that happened to be lying around during a verification run.
+/shot*.png
+/*.png
