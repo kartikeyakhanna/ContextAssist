@@ -29,6 +29,7 @@ class Session(
 
     val postReturn = PostReturnWatcher()
     val orbit = OrbitTracker()
+    val freeze = FreezeWatcher()
 
     /** Live Screen Memory Load, per screen of this app. */
     val liveSml = HashMap<String, Double>()

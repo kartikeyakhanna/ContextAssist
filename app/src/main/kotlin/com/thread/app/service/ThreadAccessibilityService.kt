@@ -4,6 +4,7 @@ import android.accessibilityservice.AccessibilityService
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.graphics.Rect
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
@@ -21,6 +22,7 @@ import com.thread.app.tools.ToolExecutionState
 import com.thread.app.tools.ToolResult
 import com.thread.engine.Arbiter
 import com.thread.engine.OfferComposer
+import com.thread.engine.Sequencer
 import com.thread.engine.TaskStateBuilder
 import com.thread.engine.Triggers
 import com.thread.engine.Weights
@@ -31,6 +33,7 @@ import com.thread.engine.model.ScreenView
 import com.thread.engine.model.ScrollReversal
 import com.thread.engine.model.ThreadEvent
 import com.thread.engine.scores.Cls
+import com.thread.engine.scores.DsFreeze
 import com.thread.engine.scores.DsOrbit
 import com.thread.engine.scores.LiveFacts
 import com.thread.engine.scores.Sml
@@ -74,6 +77,9 @@ class ThreadAccessibilityService : AccessibilityService() {
     /** The app in front of the user right now. */
     private var currentPackage: String? = null
 
+    /** The app the card currently on screen was built to describe. */
+    private var cardPackage: String? = null
+
     /** Live Screen Memory Load is now held per session; see [Session.liveSml]. */
 
     private val textCapture = TextCapture { entry -> onTextCommitted(entry) }
@@ -101,6 +107,22 @@ class ThreadAccessibilityService : AccessibilityService() {
     private val secondLookMs = 9_000L
 
     /**
+     * When to look for a choice freeze.
+     *
+     * Longer than the return looks, and necessarily so: being still is only
+     * evidence once enough time has passed that being still is unusual. Twelve
+     * seconds is under half the assumed baseline for a screen, so a normal read
+     * does not reach the second look with a high score.
+     */
+    private val freezeFirstLookMs = 12_000L
+
+    /** How often to look again while the user stays put. */
+    private val freezeRecheckMs = 15_000L
+
+    /** After this long on one screen, stop watching. */
+    private val freezeWatchWindowMs = 240_000L
+
+    /**
      * How many apps Thread will hold context for, and why there is a limit at all.
      *
      * Not a memory constraint - these are small. It is that context the user has
@@ -125,6 +147,11 @@ class ThreadAccessibilityService : AccessibilityService() {
         refreshImePackage()
         resolveLauncherPackages()
         registerSdkReceiver()
+
+        // Present from the moment the service is on, not from the first app the
+        // user happens to open. Nothing is held yet, which is the point: the way
+        // in has to exist before there is a reason to use it.
+        overlay.showDot { onDotTapped(System.currentTimeMillis()) }
     }
 
     /**
@@ -168,12 +195,14 @@ class ThreadAccessibilityService : AccessibilityService() {
             AccessibilityEvent.TYPE_VIEW_FOCUSED -> sessions.get(pkg)?.let {
                 it.postReturn.onFocus(now)
                 it.orbit.onInteraction(now)
+                it.freeze.onScan(scanKey(e))
             }
 
             AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED -> {
                 sessions.get(pkg)?.let {
                     it.postReturn.onProductiveAction(now)
                     it.orbit.onCommit(now)
+                    it.freeze.onSelect()
                 }
                 // The trail. Only from apps whose contents Thread is allowed to read.
                 if (SensitiveApps.readContent(pkg)) {
@@ -185,6 +214,7 @@ class ThreadAccessibilityService : AccessibilityService() {
             AccessibilityEvent.TYPE_VIEW_CLICKED -> sessions.get(pkg)?.let {
                 it.postReturn.onProductiveAction(now)
                 it.orbit.onCommit(now)
+                it.freeze.onSelect()
             }
         }
     }
@@ -221,6 +251,31 @@ class ThreadAccessibilityService : AccessibilityService() {
 
         textCapture.onFocusedNode(pkg, focused, now)
         scheduleTextFlush()
+    }
+
+    /**
+     * Identifies the control a focus event came from, for counting how many
+     * different things were looked at.
+     *
+     * Position is part of the key, and has to be. The first version used the
+     * event's text and class name, which on the demo form gave both text fields
+     * the same key - two blank Compose fields are indistinguishable by either -
+     * so touching one after the other counted as looking at one thing. Freeze
+     * scored 44 where it should have scored higher, and the undercount was
+     * invisible because the number still moved.
+     */
+    private fun scanKey(e: AccessibilityEvent): String? {
+        val node = runCatching { e.source }.getOrNull()
+        node?.viewIdResourceName?.takeIf { it.isNotBlank() }?.let { return it }
+
+        val label = e.text.joinToString(" ").ifBlank { e.className?.toString().orEmpty() }
+        val at = node?.let {
+            val r = Rect()
+            it.getBoundsInScreen(r)
+            "@${r.left},${r.top}"
+        }.orEmpty()
+
+        return "$label$at".ifBlank { null }
     }
 
     /**
@@ -306,6 +361,9 @@ class ThreadAccessibilityService : AccessibilityService() {
             session.orbit.onScreen(screenId, now)
             scheduleOrbitEvaluation(pkg)
         }
+
+        session.freeze.onScreen(screenId, now)
+        scheduleFreezeEvaluation(pkg)
 
         refreshDot()
     }
@@ -397,6 +455,84 @@ class ThreadAccessibilityService : AccessibilityService() {
             ORBIT_TOKEN,
             SystemClock.uptimeMillis() + 1_500L,
         )
+    }
+
+    /**
+     * Freeze can only be judged by waiting, so this is a clock, not an event.
+     *
+     * It re-arms itself rather than firing a fixed number of times. Being stuck
+     * deepens: the first minute on a screen looks identical whether someone is
+     * reading carefully or cannot begin, and only the third minute tells them
+     * apart. A fixed pair of looks would therefore check at exactly the times the
+     * answer is least knowable and then stop watching just as it becomes clear.
+     *
+     * Cancelled on the next screen change, and gives up after
+     * [freezeWatchWindowMs] - past that the user is doing something Thread has no
+     * insight into, and continuing to poll their screen would be surveillance
+     * with nothing to show for it.
+     */
+    private fun scheduleFreezeEvaluation(pkg: String) {
+        main.removeCallbacksAndMessages(FREEZE_TOKEN)
+        postFreezeLook(pkg, freezeFirstLookMs)
+    }
+
+    private fun postFreezeLook(pkg: String, delayMs: Long) {
+        main.postAtTime(
+            { evaluateFreeze(pkg, System.currentTimeMillis()) },
+            FREEZE_TOKEN,
+            SystemClock.uptimeMillis() + delayMs,
+        )
+    }
+
+    /**
+     * Standing still on one screen, weighing options, committing to none.
+     *
+     * Reads the tree twice over: once for the score's inputs, once for the plan.
+     * Both come from the same flatten, so the score and the offer can never be
+     * describing different screens - which they would be if the user moved
+     * between two reads.
+     */
+    fun evaluateFreeze(pkg: String, now: Long) {
+        val session = sessions.get(pkg) ?: return
+        if (pkg != currentPackage) return
+
+        val nodes = LiveComplexity.flatten(rootInActiveWindow)
+        if (nodes.isEmpty()) return
+
+        val facts = LiveFacts.facts(session.builder.state.currentScreenId, nodes)
+        val freeze = DsFreeze.score(
+            session.freeze.signals(
+                now = now,
+                optionCount = facts.optionCount,
+                irreversiblePresent = facts.irreversibleActions > 0,
+            ),
+            weights,
+        )
+
+        val plan = Sequencer.plan(nodes)
+
+        Log.d(
+            TAG,
+            "freeze[$pkg]: ${freeze.value.toInt()} factors=${freeze.factors} " +
+                "plan=${plan?.let { "${it.position}/${it.total} next='${it.next?.label}'" } ?: "none"}",
+        )
+
+        if (plan == null) {
+            Log.d(
+                TAG,
+                "no plan, candidates=" + nodes
+                    .filter { it.isEditable || it.isCheckable }
+                    .joinToString { "[ed=${it.isEditable} ck=${it.isCheckable} " +
+                        "text='${it.text}' hint='${it.hintText}' cd='${it.contentDescription}']" },
+            )
+        }
+
+        present(Triggers.evaluate(state = session.builder.state, freeze = freeze, plan = plan, w = weights), now)
+
+        // Look again while they are still here and still have not chosen.
+        if (pkg == currentPackage && session.freeze.stillWatching(now, freezeWatchWindowMs)) {
+            postFreezeLook(pkg, freezeRecheckMs)
+        }
     }
 
     private fun onScrolled(pkg: String, e: AccessibilityEvent, now: Long) {
@@ -520,7 +656,7 @@ class ThreadAccessibilityService : AccessibilityService() {
         when {
             selected != null -> overlay.show(selected, arbiter)
             evaluation.passiveOnly -> overlay.showPassiveMarker()
-            else -> overlay.hideCardsOnly()
+            else -> overlay.clearAutomaticCards()
         }
     }
 
@@ -534,13 +670,18 @@ class ThreadAccessibilityService : AccessibilityService() {
      * no recall, no phrasing, no deciding what to ask for.
      */
     fun onDotTapped(now: Long) {
-        val session = sessions.get(currentPackage ?: return) ?: return
+        val pkg = currentPackage ?: return
+        // The dot is always there now, so it must always answer. An app with no
+        // session yet gets one here rather than a tap that does nothing.
+        val session = sessions.get(pkg) ?: openSession(pkg, "$pkg/unknown", now)
+        cardPackage = pkg
         val offer = OfferComposer.resumption(session.builder.state, triggeredBy = null)
         val breakdownContext = captureBreakdownContext(session)
         overlay.show(
             offer = arbiter.userRequested(offer, now),
             arbiter = arbiter,
             showTextInput = true,
+            userRequested = true,
             onTextSubmitted = { text -> session.latestSubmittedText = text },
             breakdownContext = breakdownContext,
             initialToolState = session.toolExecutionState,
@@ -578,6 +719,7 @@ class ThreadAccessibilityService : AccessibilityService() {
                     result = ToolResult.Breakdown(breakdown),
                 )
             } catch (error: BreakdownClientException) {
+                Log.w(TAG, "breakdown failed: ${error.message}", error)
                 ToolExecutionState.Failure(
                     requestId = requestId,
                     invocation = effectiveInvocation,
@@ -610,19 +752,34 @@ class ThreadAccessibilityService : AccessibilityService() {
         currentPackage?.let { sessions.get(it)?.latestSubmittedText }
 
     /**
-     * The dot is per-app, and it is shown only where there is something to pull.
+     * The dot is always present, and the open card is kept in step with whatever
+     * app the user is now looking at.
      *
-     * An app Thread has nothing on gets no dot, because a dot that opens an empty
-     * card teaches the user that tapping it is not worth it - and the tap is the
-     * one interaction this whole design depends on being trusted.
+     * It used to be shown only where there was something to pull, which meant it
+     * vanished in exactly the apps Thread had not yet learned anything about. The
+     * tap is the one interaction this design depends on being trusted, and a
+     * button that is sometimes absent cannot be reached for without first
+     * checking whether it is there - which is the remembering this is meant to
+     * remove. An empty card is a smaller cost than an unreliable one.
      */
     private fun refreshDot() {
         if (!::overlay.isInitialized) return
-        val session = sessions.get(currentPackage ?: return)
-        if (session != null && session.hasContext()) {
-            overlay.showDot { onDotTapped(System.currentTimeMillis()) }
-        } else {
-            overlay.hide()
+
+        overlay.showDot { onDotTapped(System.currentTimeMillis()) }
+
+        val session = currentPackage?.let { sessions.get(it) }
+        if (session == null || !session.hasContext()) overlay.clearAutomaticCards()
+
+        // An open card describes the app in front of the user, not the one they
+        // were in when they opened it. Left alone it would keep displaying the
+        // previous app's context, which is worse than showing nothing: it reads
+        // exactly like a current answer.
+        //
+        // Only on an actual change of app. Rebuilding the card on every event
+        // would discard whatever the user was part-way through typing into it.
+        val pkg = currentPackage
+        if (overlay.hasUserRequestedCard() && pkg != null && pkg != cardPackage) {
+            onDotTapped(System.currentTimeMillis())
         }
     }
 
@@ -686,6 +843,7 @@ class ThreadAccessibilityService : AccessibilityService() {
         Log.d(TAG, "endTask - dropping session for $target")
         main.removeCallbacksAndMessages(RETURN_TOKEN)
         main.removeCallbacksAndMessages(ORBIT_TOKEN)
+        main.removeCallbacksAndMessages(FREEZE_TOKEN)
         textCapture.forget(target)
         sessions.remove(target)
         refreshDot()
@@ -695,9 +853,11 @@ class ThreadAccessibilityService : AccessibilityService() {
     private fun dropEverything() {
         main.removeCallbacksAndMessages(RETURN_TOKEN)
         main.removeCallbacksAndMessages(ORBIT_TOKEN)
+        main.removeCallbacksAndMessages(FREEZE_TOKEN)
         sessions.clear()
         textCapture.clear()
         currentPackage = null
+        cardPackage = null
         if (::overlay.isInitialized) overlay.hide()
     }
 
@@ -783,5 +943,6 @@ class ThreadAccessibilityService : AccessibilityService() {
         val RETURN_TOKEN = Any()
         val ORBIT_TOKEN = Any()
         val TEXT_TOKEN = Any()
+        val FREEZE_TOKEN = Any()
     }
 }

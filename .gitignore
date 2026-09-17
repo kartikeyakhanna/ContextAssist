@@ -24,3 +24,6 @@ study/results/
 
 # Local Firebase project configuration
 /app/google-services.json
+
+# Kotlin compiler scratch: error dumps and daemon session files from local builds.
+.kotlin/

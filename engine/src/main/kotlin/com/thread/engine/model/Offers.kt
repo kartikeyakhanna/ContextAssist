@@ -1,7 +1,7 @@
 package com.thread.engine.model
 
 /**
- * What the user actually sees. There are only six, deliberately.
+ * What the user actually sees. There are only seven, deliberately.
  *
  * Every offer is additive and reversible. None of them mutate the underlying app,
  * hide options, or block interaction. That constraint is the product, not a
@@ -78,6 +78,35 @@ sealed interface Offer {
         override val kind get() = OfferKind.DEFAULT_HINT
     }
 
+    /**
+     * C2: decision paralysis. One action at a time, out of however many there are.
+     *
+     * The counter to Hick's Law without touching the app: the cost of choosing
+     * grows with log2(1 + n), so proposing one thing takes a twenty-five option
+     * screen from 4.70 to 1.00 while all twenty-five remain exactly where they
+     * were. Nothing is hidden, moved or disabled - the user can ignore this
+     * entirely and the screen still works the way it always did.
+     *
+     * [instruction] is built from the app's own label for a control that is on
+     * screen right now. It is never generated text. A plausible-sounding step
+     * that does not exist would send someone who is already struggling down a
+     * path they cannot easily tell is wrong, which is the harm this is meant to
+     * prevent rather than cause.
+     *
+     * [position] of [total] is the other half of the value, and for a returning
+     * user often the larger half: it says how much of this you already did.
+     */
+    data class NextStep(
+        val instruction: String,
+        val position: Int,
+        val total: Int,
+        /** Where the real control is, for a ring drawn in Thread's own overlay. */
+        val target: com.thread.engine.scores.LiveFacts.Bounds? = null,
+        override val triggeredBy: Score?,
+    ) : Offer {
+        override val kind get() = OfferKind.NEXT_STEP
+    }
+
     /** C3: task initiation support. A lens over the form, never a deletion. */
     data class SequencingMode(
         val sectionCount: Int,
@@ -102,6 +131,7 @@ enum class OfferKind {
     PIN,
     ERROR_EXPLANATION,
     DEFAULT_HINT,
+    NEXT_STEP,
     SEQUENCING,
     REASSURANCE,
 }

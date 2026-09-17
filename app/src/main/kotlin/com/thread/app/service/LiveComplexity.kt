@@ -1,5 +1,6 @@
 package com.thread.app.service
 
+import android.graphics.Rect
 import android.view.accessibility.AccessibilityNodeInfo
 import com.thread.engine.scores.LiveFacts
 
@@ -33,10 +34,19 @@ object LiveComplexity {
 
         out.add(
             LiveFacts.VisibleNode(
+                // Merged, as scoring has always read it - widening the type must
+                // not move an SML number.
                 text = node.text?.toString() ?: node.contentDescription?.toString(),
                 isClickable = node.isClickable,
                 isCheckable = node.isCheckable,
                 isEditable = node.isEditable,
+                // Carried separately for the sequencer, which has to tell a
+                // field's label from the value the user typed into it.
+                hintText = node.hintText?.toString(),
+                contentDescription = node.contentDescription?.toString(),
+                isEnabled = node.isEnabled,
+                isChecked = node.isChecked,
+                bounds = node.screenBounds(),
             ),
         )
 
@@ -44,5 +54,19 @@ object LiveComplexity {
             val child = runCatching { node.getChild(i) }.getOrNull() ?: continue
             walk(child, depth + 1, out)
         }
+    }
+
+    /**
+     * Screen coordinates, or null if the node reports none.
+     *
+     * Null rather than a zero rectangle: the sequencer falls back to tree order
+     * for unpositioned nodes, and (0,0) would instead sort them to the top of the
+     * screen - putting a control the app never placed at the front of the plan.
+     */
+    private fun AccessibilityNodeInfo.screenBounds(): LiveFacts.Bounds? {
+        val rect = Rect()
+        getBoundsInScreen(rect)
+        if (rect.isEmpty) return null
+        return LiveFacts.Bounds(rect.left, rect.top, rect.right, rect.bottom)
     }
 }

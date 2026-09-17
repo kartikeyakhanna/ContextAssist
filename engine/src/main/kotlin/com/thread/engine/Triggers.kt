@@ -37,6 +37,8 @@ object Triggers {
         initiation: Score? = null,
         commitContext: CommitContext? = null,
         justReturned: Boolean = false,
+        /** What the screen is still asking for, when it has a recoverable order. */
+        plan: Sequencer.Plan? = null,
         w: Weights = Weights.DEFAULT,
     ): Evaluation {
         val candidates = mutableListOf<Offer>()
@@ -83,12 +85,15 @@ object Triggers {
         }
 
         // 6. Cannot choose. Lower the stakes - never remove the options.
+        //
+        // This used to fabricate a default ("Standard is fine for most claims"),
+        // which was fine on the one demo screen it was written for and nonsense
+        // everywhere else. A defensible default is knowledge about a specific
+        // decision; nothing here has it for an arbitrary app. What Thread can do
+        // honestly is read what the screen is still asking for and name the next
+        // one. When there is no recoverable order, it says nothing at all.
         if (freeze.fires(w)) {
-            candidates += Offer.DefaultHint(
-                suggestion = "Standard is fine for most claims",
-                reversibility = "You can change this after submitting",
-                triggeredBy = freeze,
-            )
+            plan?.let { OfferComposer.nextStep(it, freeze)?.let { offer -> candidates += offer } }
         }
 
         val anyPassive = listOf(cls, orbit, freeze, initiation)

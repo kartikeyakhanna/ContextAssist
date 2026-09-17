@@ -32,6 +32,47 @@ object OfferComposer {
         )
 
     /**
+     * One step, in the app's own words.
+     *
+     * Only the first step is rendered, even though the plan holds several. A list
+     * of five steps is five things to hold, which is the load this is supposed to
+     * be removing - it would look more impressive in a screenshot and be worse to
+     * use. The count is carried instead, because knowing the task is four long is
+     * orientation and costs nothing to hold.
+     *
+     * The verb is chosen from what the control *is*, never from what it might be
+     * for. "Enter", "Choose" and "Then" are the only three, and each is true by
+     * construction: an editable node is filled in, a checkable one is chosen, and
+     * a terminal one comes last.
+     */
+    fun nextStep(plan: Sequencer.Plan, triggeredBy: Score?): Offer.NextStep? {
+        val step = plan.next ?: return null
+
+        val instruction = when (step.kind) {
+            Sequencer.StepKind.FILL -> "Enter ${step.label.decapitalised()}"
+            Sequencer.StepKind.CHOOSE -> "Choose ${step.label.decapitalised()}"
+            Sequencer.StepKind.CONFIRM -> "Then ${step.label.decapitalised()}"
+        }
+
+        return Offer.NextStep(
+            instruction = instruction,
+            position = plan.position,
+            total = plan.total,
+            target = step.bounds,
+            triggeredBy = triggeredBy,
+        )
+    }
+
+    /**
+     * "Enter Policy number" reads as a quotation; "Enter policy number" reads as a
+     * sentence. Acronyms are left alone - "Enter iBAN" would be worse than either.
+     */
+    private fun String.decapitalised(): String {
+        if (length >= 2 && this[1].isUpperCase()) return this
+        return replaceFirstChar { it.lowercase() }
+    }
+
+    /**
      * Null when nothing was observed, rather than "Nothing filled in yet".
      *
      * Thread only sees field-level progress in an app that reports it. On every
