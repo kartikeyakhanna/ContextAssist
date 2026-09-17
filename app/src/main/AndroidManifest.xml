@@ -8,6 +8,28 @@
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!--
+      Thread needs to recognise the home screen, and nothing else about the apps
+      installed here.
+
+      Since Android 11 an app cannot see other packages unless it declares what it
+      is looking for. Without this block queryIntentActivities returns an empty
+      list rather than an error - verified on a Pixel 10, where the launcher check
+      silently resolved to nothing and the home screen started collecting sessions
+      of its own. It failed quietly, which is the kind of failure that survives a
+      demo and shows up in front of a user.
+
+      Deliberately narrow: this asks for home-screen resolvers only. It is not
+      QUERY_ALL_PACKAGES, which would let Thread enumerate every app on the device
+      and is exactly the sort of reach an assistive tool has no business having.
+    -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.HOME" />
+        </intent>
+    </queries>
+
     <application
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
