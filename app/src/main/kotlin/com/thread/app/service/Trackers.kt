@@ -1,6 +1,7 @@
 package com.thread.app.service
 
 import com.thread.engine.scores.Cls
+import com.thread.engine.scores.DsFreeze
 import com.thread.engine.scores.DsOrbit
 
 /**
@@ -130,5 +131,100 @@ class OrbitTracker {
         currentScreenInteracted = false
         lastScrollDirectionDown = null
         lastScrollAt = 0L
+    }
+}
+
+/**
+ * Watches a single screen for someone who is scanning it and choosing nothing.
+ *
+ * The distinction this has to draw is between *reading* and *stuck*, and the only
+ * thing that separates them is time against what the screen usually takes. So it
+ * measures dwell as a multiple of a baseline rather than in absolute seconds -
+ * fifteen seconds on a confirmation dialog is a long time, and on a form it is
+ * nothing at all.
+ *
+ * Resets on every screen change. Freeze is a property of standing still in one
+ * place; carrying it across screens would turn ordinary navigation into evidence
+ * of struggle.
+ */
+class FreezeWatcher {
+
+    private var screenId: String? = null
+    private var enteredAt = 0L
+    private var selected = false
+    private val scanned = HashSet<String>()
+
+    fun onScreen(screenId: String, now: Long) {
+        if (screenId == this.screenId) return
+        this.screenId = screenId
+        enteredAt = now
+        selected = false
+        scanned.clear()
+    }
+
+    /**
+     * Looked at an option. Deduplicated by label, because the signal being sought
+     * is breadth - how many different things were weighed - and focus events
+     * bounce between the same two controls often enough that counting repeats
+     * would make indecision look like far more of it than there was.
+     */
+    fun onScan(key: String?) {
+        if (key.isNullOrBlank() || selected) return
+        scanned += key
+    }
+
+    /** Anything committed clears the suspicion entirely. They chose. */
+    fun onSelect() {
+        selected = true
+    }
+
+    /**
+     * Still worth another look: they are here, and they have not chosen.
+     *
+     * Stopping once something is selected matters more than it looks. Watching a
+     * screen indefinitely is a poll of the user's display, and the moment they act
+     * there is nothing left to detect - continuing would be collecting for its own
+     * sake, which is the thing Thread has to be able to say it does not do.
+     */
+    fun stillWatching(now: Long, windowMs: Long): Boolean {
+        if (selected || enteredAt == 0L) return false
+        return now - enteredAt < windowMs
+    }
+
+    fun signals(
+        now: Long,
+        optionCount: Int,
+        irreversiblePresent: Boolean,
+        baselineSeconds: Double = DEFAULT_BASELINE_SECONDS,
+    ): DsFreeze.FreezeSignals = DsFreeze.FreezeSignals(
+        secondsOnScreen = if (enteredAt == 0L) 0.0 else (now - enteredAt) / 1000.0,
+        baselineSecondsForScreen = baselineSeconds,
+        optionsScanned = scanned.size,
+        // Not collected. A dropdown opening is a window change indistinguishable
+        // from a dialog, and guessing would put weight on a number that is not a
+        // measurement. Zero costs at most 20 of 100 and is honest.
+        openCloseLoops = 0,
+        anythingSelected = selected,
+        optionCount = optionCount,
+        irreversibleActionPresent = irreversiblePresent,
+    )
+
+    fun reset() {
+        screenId = null
+        enteredAt = 0L
+        selected = false
+        scanned.clear()
+    }
+
+    companion object {
+        /**
+         * How long a screen is assumed to take when nothing better is known.
+         *
+         * Per-screen medians would be better and need a population to learn from,
+         * which Thread does not have and will not collect. Until then this is one
+         * number applied everywhere, and it is the reason freeze is reported as
+         * the weakest of the four scores.
+         */
+        const val DEFAULT_BASELINE_SECONDS = 30.0
     }
 }

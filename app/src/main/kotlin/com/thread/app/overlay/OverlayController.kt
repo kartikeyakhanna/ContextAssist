@@ -47,6 +47,17 @@ class OverlayController(private val context: Context) {
     private var dotView: View? = null
 
     /**
+     * Whether the card currently on screen was asked for, rather than offered.
+     *
+     * The detection loop re-runs on every accessibility event, and a card that is
+     * focusable generates those events simply by existing. Without this, the act
+     * of opening the card is itself what closes it. More importantly: a user who
+     * taps the dot has asked a question, and no score is entitled to withdraw the
+     * answer while they are still reading it.
+     */
+    private var cardIsUserRequested = false
+
+    /**
      * The only thing Thread shows without being asked.
      *
      * A small, static dot - no badge, no count, no pulse. It is deliberately not
@@ -69,6 +80,7 @@ class OverlayController(private val context: Context) {
         offer: Offer,
         arbiter: Arbiter,
         showTextInput: Boolean = false,
+        userRequested: Boolean = false,
         onTextSubmitted: (String) -> Unit = {},
         initialToolState: ToolExecutionState = ToolExecutionState.Idle,
         onToolStateChanged: (ToolExecutionState) -> Unit = {},
@@ -76,15 +88,20 @@ class OverlayController(private val context: Context) {
     ) {
         when (offer) {
             is Offer.Pin -> showPin(offer, arbiter)
-            else -> showCard(
-                offer = offer,
-                arbiter = arbiter,
-                showTextInput = showTextInput,
-                onTextSubmitted = onTextSubmitted,
-                initialToolState = initialToolState,
-                onToolStateChanged = onToolStateChanged,
-                onToolInvoked = onToolInvoked,
-            )
+            else -> {
+                // An offer the user did not ask for never displaces an answer they did.
+                if (cardIsUserRequested && !userRequested) return
+                showCard(
+                    offer = offer,
+                    arbiter = arbiter,
+                    showTextInput = showTextInput,
+                    userRequested = userRequested,
+                    onTextSubmitted = onTextSubmitted,
+                    initialToolState = initialToolState,
+                    onToolStateChanged = onToolStateChanged,
+                    onToolInvoked = onToolInvoked,
+                )
+            }
         }
     }
 
@@ -92,12 +109,14 @@ class OverlayController(private val context: Context) {
         offer: Offer,
         arbiter: Arbiter,
         showTextInput: Boolean,
+        userRequested: Boolean,
         onTextSubmitted: (String) -> Unit,
         initialToolState: ToolExecutionState,
         onToolStateChanged: (ToolExecutionState) -> Unit,
         onToolInvoked: (ToolInvocation, (ToolExecutionState) -> Unit) -> Unit,
     ) {
         hideCard()
+        cardIsUserRequested = userRequested
         cardView = composeOverlay(
             gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL,
             focusable = showTextInput,
@@ -146,6 +165,18 @@ class OverlayController(private val context: Context) {
 
     /** The passive band: a quiet marker, never a card. No badge, no animation. */
     fun showPassiveMarker() {
+        clearAutomaticCards()
+    }
+
+    /**
+     * Clears offers the detection loop put up, and only those.
+     *
+     * A card the user asked for survives this. The loop re-evaluates on every
+     * accessibility event, so treating "nothing to offer" as "take the answer
+     * away" would close the card roughly as fast as tapping the dot opened it.
+     */
+    fun clearAutomaticCards() {
+        if (cardIsUserRequested) return
         hideCard()
     }
 
@@ -161,6 +192,9 @@ class OverlayController(private val context: Context) {
         hideCard()
     }
 
+    /** Whether the card on screen was asked for, rather than offered. */
+    fun hasUserRequestedCard(): Boolean = cardIsUserRequested
+
     fun hide() {
         hideCard()
         hidePin()
@@ -175,6 +209,7 @@ class OverlayController(private val context: Context) {
     private fun hideCard() {
         cardView?.let { runCatching { windowManager.removeView(it) } }
         cardView = null
+        cardIsUserRequested = false
     }
 
     private fun hidePin() {

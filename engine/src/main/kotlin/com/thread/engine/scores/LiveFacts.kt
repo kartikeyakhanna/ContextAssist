@@ -19,12 +19,38 @@ package com.thread.engine.scores
  */
 object LiveFacts {
 
-    /** The only properties of a node this needs. Everything else is noise here. */
+    /** Where a node sits on screen. Enough to recover reading order, nothing more. */
+    data class Bounds(
+        val left: Int,
+        val top: Int,
+        val right: Int,
+        val bottom: Int,
+    ) {
+        val centreY: Int get() = (top + bottom) / 2
+        val height: Int get() = bottom - top
+    }
+
+    /**
+     * The properties of a node this module and [com.thread.engine.Sequencer] need.
+     *
+     * [text] stays the merged text-or-content-description that scoring has always
+     * used, so widening this type cannot move an SML number. [hintText] and
+     * [contentDescription] are carried *separately* because the sequencer needs to
+     * tell a field's label from its value, and the merged form cannot: an empty
+     * field reports its own hint as its text, which is how Thread once told a user
+     * they had typed something they had not.
+     */
     data class VisibleNode(
         val text: String? = null,
         val isClickable: Boolean = false,
         val isCheckable: Boolean = false,
         val isEditable: Boolean = false,
+        val hintText: String? = null,
+        val contentDescription: String? = null,
+        /** Disabled means the app itself says the prerequisite is not met yet. */
+        val isEnabled: Boolean = true,
+        val isChecked: Boolean = false,
+        val bounds: Bounds? = null,
     )
 
     /**
@@ -46,6 +72,15 @@ object LiveFacts {
     private val IRREVERSIBLE = Regex(
         "(?i)\\b(submit|send|delete|remove|pay|confirm|discard|publish|approve|reject|cancel booking)\\b",
     )
+
+    /**
+     * A control that ends the task rather than advancing it.
+     *
+     * Shared with the sequencer, which needs it for the opposite reason: scoring
+     * counts these as stakes, sequencing uses them to know what must come *last*.
+     */
+    fun irreversible(text: String?): Boolean =
+        text != null && IRREVERSIBLE.containsMatchIn(text)
 
     private val CROSS_REFERENCE = Regex(
         "(?i)\\b(find|look ?up|refer to|enter your|from the)\\b[^.]{0,40}" +

@@ -155,6 +155,7 @@ fun ThreadSurface(
         is Offer.Reassurance -> OneLineChip("${offer.consequence}. You can undo for ${offer.undoWindowSeconds / 60} minutes.", onDismiss)
         is Offer.ErrorExplanation -> OneLineChip(offer.message, onDismiss)
         is Offer.DefaultHint -> OneLineChip("${offer.suggestion}. ${offer.reversibility}.", onDismiss)
+        is Offer.NextStep -> NextStepCard(offer, onDismiss)
         is Offer.SequencingMode -> SequencingOffer(offer, onAccept, onDismiss)
         is Offer.Pin -> PinChip(offer.label, offer.value, onDismiss)
     }
@@ -544,6 +545,44 @@ private fun OneLineChip(text: String, onDismiss: () -> Unit) {
             .clickable(onClick = onDismiss)
             .padding(horizontal = 16.dp, vertical = 12.dp),
     )
+}
+
+/**
+ * One action, and where you are in the list. Never the whole list.
+ *
+ * Nothing here is a control of the host app - it is a sentence about one. The
+ * user taps the real thing on the real screen, in the place the app put it, and
+ * every other option is still there. This card can be ignored completely and the
+ * task still works exactly as it did, which is the property that makes it safe to
+ * be wrong.
+ */
+@Composable
+private fun NextStepCard(offer: Offer.NextStep, onDismiss: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .widthIn(max = 320.dp)
+            .background(Surface, RoundedCornerShape(14.dp))
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            Text(offer.instruction, color = OnSurface, fontSize = 15.sp)
+            Text(
+                "${offer.position} of ${offer.total}",
+                color = Muted,
+                fontSize = 12.sp,
+            )
+        }
+        Text(
+            "Dismiss",
+            color = Muted,
+            fontSize = 13.sp,
+            modifier = Modifier.clickable(onClick = onDismiss),
+        )
+    }
 }
 
 /** Sequencing is a lens over the form, never a deletion. Every field stays reachable. */
