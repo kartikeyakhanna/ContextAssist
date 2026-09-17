@@ -1,7 +1,8 @@
 plugins {
-    id("com.android.application") version "8.7.2"
-    id("org.jetbrains.kotlin.android") version "2.2.0"
-    id("org.jetbrains.kotlin.plugin.compose") version "2.2.0"
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
+    id("com.google.gms.google-services")
 }
 
 android {
@@ -47,4 +48,11 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.savedstate:savedstate-ktx:1.2.1")
+
+    implementation(platform("com.google.firebase:firebase-bom:34.19.0"))
+    implementation("com.google.firebase:firebase-ai")
+    implementation("com.google.firebase:firebase-appcheck-playintegrity")
+    debugImplementation("com.google.firebase:firebase-appcheck-debug")
+
+    testImplementation(kotlin("test-junit"))
 }

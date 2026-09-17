@@ -14,6 +14,10 @@ import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import com.thread.app.overlay.OverlayController
+import com.thread.app.tools.BreakdownClient
+import com.thread.app.tools.BreakdownClientException
+import com.thread.app.tools.ToolExecutionState
+import com.thread.app.tools.ToolResult
 import com.thread.engine.Arbiter
 import com.thread.engine.OfferComposer
 import com.thread.engine.TaskStateBuilder
@@ -30,6 +34,13 @@ import com.thread.engine.scores.DsOrbit
 import com.thread.engine.scores.LiveFacts
 import com.thread.engine.scores.Sml
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicLong
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
 /**
  * The collector. Tier 1: observes any app on the device with no integration at all.
@@ -40,8 +51,9 @@ import java.util.UUID
  * works on Excel, Teams, Outlook and everything else without any of them changing
  * a line of code.
  *
- * Nothing observed here is persisted or transmitted. The engine is a pure-Kotlin
- * module with no network dependency, and there is no database in this repository.
+ * Nothing observed here is persisted. Behavioural signals stay on-device. When
+ * the user explicitly invokes @breakdown, only that submitted task and the generic
+ * session intent are sent through Firebase AI Logic to Gemini.
  */
 class ThreadAccessibilityService : AccessibilityService() {
 
@@ -53,6 +65,9 @@ class ThreadAccessibilityService : AccessibilityService() {
     private var complexityCache: Map<String, Double> = emptyMap()
 
     private val sessions = SessionStore()
+    private lateinit var breakdownClient: BreakdownClient
+    private val toolScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val nextToolRequestId = AtomicLong()
 
     /** The app in front of the user right now. */
     private var currentPackage: String? = null
@@ -103,6 +118,7 @@ class ThreadAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         overlay = OverlayController(this)
+        breakdownClient = BreakdownClient(this)
         complexityCache = ComplexityCache.load(this)
         refreshImePackage()
         resolveLauncherPackages()
@@ -523,7 +539,57 @@ class ThreadAccessibilityService : AccessibilityService() {
             arbiter = arbiter,
             showTextInput = true,
             onTextSubmitted = { text -> session.latestSubmittedText = text },
+            initialToolState = session.toolExecutionState,
+            onToolStateChanged = { state -> session.toolExecutionState = state },
+            onToolInvoked = { invocation, onStateChanged ->
+                executeTool(session, invocation, onStateChanged)
+            },
         )
+    }
+
+    private fun executeTool(
+        session: Session,
+        invocation: com.thread.app.tools.ToolInvocation,
+        onStateChanged: (ToolExecutionState) -> Unit,
+    ) {
+        val effectiveInvocation = invocation.copy(
+            input = invocation.input.ifBlank { session.builder.state.intent },
+        )
+        val requestId = nextToolRequestId.incrementAndGet()
+        val loading = ToolExecutionState.Loading(requestId, effectiveInvocation)
+        val intent = session.builder.state.intent
+        session.toolExecutionState = loading
+        onStateChanged(loading)
+
+        toolScope.launch {
+            val completedState = try {
+                val breakdown = breakdownClient.generate(
+                    task = effectiveInvocation.input,
+                    intent = intent,
+                )
+                ToolExecutionState.Success(
+                    requestId = requestId,
+                    invocation = effectiveInvocation,
+                    result = ToolResult.Breakdown(breakdown),
+                )
+            } catch (error: BreakdownClientException) {
+                ToolExecutionState.Failure(
+                    requestId = requestId,
+                    invocation = effectiveInvocation,
+                    message = error.message ?: "Gemini returned an invalid response.",
+                )
+            } catch (error: CancellationException) {
+                throw error
+            }
+
+            main.post {
+                if (sessions.get(session.packageName) !== session) return@post
+                val active = session.toolExecutionState as? ToolExecutionState.Loading
+                if (active?.requestId != requestId) return@post
+                session.toolExecutionState = completedState
+                onStateChanged(completedState)
+            }
+        }
     }
 
     fun latestSubmittedText(): String? =
@@ -637,6 +703,7 @@ class ThreadAccessibilityService : AccessibilityService() {
 
     override fun onDestroy() {
         dropEverything()
+        toolScope.cancel()
         sdkReceiver?.let { runCatching { unregisterReceiver(it) } }
         sdkReceiver = null
         super.onDestroy()

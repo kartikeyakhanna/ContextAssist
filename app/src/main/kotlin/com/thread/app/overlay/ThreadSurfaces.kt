@@ -2,8 +2,11 @@ package com.thread.app.overlay
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -16,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -26,11 +30,24 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.thread.app.tools.TaskBreakdown
+import com.thread.app.tools.ThreadTool
+import com.thread.app.tools.ToolExecutionState
+import com.thread.app.tools.ToolInput
+import com.thread.app.tools.ToolInvocation
+import com.thread.app.tools.ToolRegistry
+import com.thread.app.tools.ToolResult
 import com.thread.engine.model.Offer
 
 /**
@@ -83,12 +100,56 @@ fun ThreadSurface(
     onNever: () -> Unit,
     showTextInput: Boolean = false,
     onTextSubmitted: (String) -> Unit = {},
+    initialToolState: ToolExecutionState = ToolExecutionState.Idle,
+    onToolStateChanged: (ToolExecutionState) -> Unit = {},
+    onToolInvoked: (ToolInvocation, (ToolExecutionState) -> Unit) -> Unit = { _, _ -> },
 ) {
     when (offer) {
         is Offer.Resumption -> {
+            var toolState by remember(initialToolState) { mutableStateOf(initialToolState) }
+
+            fun updateToolState(updated: ToolExecutionState) {
+                toolState = updated
+                onToolStateChanged(updated)
+            }
+
+            fun invokeTool(invocation: ToolInvocation) {
+                onToolInvoked(invocation, ::updateToolState)
+            }
+
+            fun updateBreakdown(updated: TaskBreakdown) {
+                val success = toolState as? ToolExecutionState.Success ?: return
+                updateToolState(
+                    success.copy(result = ToolResult.Breakdown(updated)),
+                )
+            }
+
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 ResumptionCard(offer, onAccept, onDismiss, onNever)
-                if (showTextInput) UserTextInputBar(onTextSubmitted)
+                when (val current = toolState) {
+                    ToolExecutionState.Idle -> Unit
+                    is ToolExecutionState.Loading -> ToolStatusPanel(
+                        title = "Generating steps...",
+                        message = current.invocation.input,
+                    )
+                    is ToolExecutionState.Success -> {
+                        val result = current.result
+                        if (result is ToolResult.Breakdown) {
+                            TaskBreakdownPanel(result.value, ::updateBreakdown)
+                        }
+                    }
+                    is ToolExecutionState.Failure -> ToolFailurePanel(
+                        message = current.message,
+                        onRetry = { invokeTool(current.invocation) },
+                    )
+                }
+                if (showTextInput) {
+                    UserTextInputBar(
+                        fallbackTask = offer.intent,
+                        onSubmit = onTextSubmitted,
+                        onToolInvoked = ::invokeTool,
+                    )
+                }
             }
         }
         is Offer.Reassurance -> OneLineChip("${offer.consequence}. You can undo for ${offer.undoWindowSeconds / 60} minutes.", onDismiss)
@@ -100,36 +161,281 @@ fun ThreadSurface(
 }
 
 @Composable
-private fun UserTextInputBar(onSubmit: (String) -> Unit) {
-    var text by remember { mutableStateOf("") }
+private fun ToolStatusPanel(
+    title: String,
+    message: String,
+) {
+    Column(
+        modifier = Modifier
+            .widthIn(max = 340.dp)
+            .background(Surface, RoundedCornerShape(14.dp))
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            title,
+            color = OnSurface,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(message, color = Muted, fontSize = 13.sp, maxLines = 2)
+    }
+}
 
-    fun submit() {
+@Composable
+private fun ToolFailurePanel(
+    message: String,
+    onRetry: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .widthIn(max = 340.dp)
+            .background(Surface, RoundedCornerShape(14.dp))
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            "Could not generate steps",
+            color = OnSurface,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(message, color = Muted, fontSize = 13.sp)
+        Text(
+            "Retry",
+            color = Accent,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.clickable(onClick = onRetry),
+        )
+    }
+}
+
+@Composable
+private fun UserTextInputBar(
+    fallbackTask: String,
+    onSubmit: (String) -> Unit,
+    onToolInvoked: (ToolInvocation) -> Unit,
+) {
+    var text by remember { mutableStateOf("") }
+    var highlightedIndex by remember { mutableStateOf(0) }
+
+    val suggestions = ToolInput.activeQuery(text)
+        ?.let(ToolRegistry::search)
+        .orEmpty()
+    val selectedTool = ToolInput.selectedTool(text)
+    val placeholder = selectedTool?.definition?.inputHint ?: "Type a message or @ for tools"
+
+    fun selectTool(tool: ThreadTool) {
+        text = ToolInput.select(tool)
+        highlightedIndex = 0
+    }
+
+    fun performAction() {
+        if (suggestions.isNotEmpty()) {
+            selectTool(suggestions[highlightedIndex.coerceIn(suggestions.indices)])
+            return
+        }
+
         val submitted = text.trim()
         if (submitted.isEmpty()) return
         onSubmit(submitted)
         text = ""
+        highlightedIndex = 0
+
+        ToolInput.invocation(submitted)?.let { invocation ->
+            onToolInvoked(
+                if (invocation.input.isBlank()) {
+                    invocation.copy(input = fallbackTask)
+                } else {
+                    invocation
+                },
+            )
+        }
     }
 
-    BasicTextField(
-        value = text,
-        onValueChange = { text = it },
-        singleLine = true,
-        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-        keyboardActions = KeyboardActions(onSend = { submit() }),
-        textStyle = TextStyle(color = OnSurface, fontSize = 15.sp),
-        cursorBrush = SolidColor(Accent),
+    Column(
+        modifier = Modifier.widthIn(max = 340.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        if (suggestions.isNotEmpty()) {
+            ToolMenu(
+                tools = suggestions,
+                highlightedIndex = highlightedIndex.coerceIn(suggestions.indices),
+                onSelect = ::selectTool,
+            )
+        }
+
+        BasicTextField(
+            value = text,
+            onValueChange = {
+                text = it
+                highlightedIndex = 0
+            },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+            keyboardActions = KeyboardActions(onSend = { performAction() }),
+            textStyle = TextStyle(color = OnSurface, fontSize = 15.sp),
+            cursorBrush = SolidColor(Accent),
+            modifier = Modifier
+                .fillMaxWidth()
+                .onPreviewKeyEvent { event ->
+                    if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                    when {
+                        suggestions.isNotEmpty() && event.key == Key.DirectionDown -> {
+                            highlightedIndex = (highlightedIndex + 1) % suggestions.size
+                            true
+                        }
+                        suggestions.isNotEmpty() && event.key == Key.DirectionUp -> {
+                            highlightedIndex =
+                                (highlightedIndex - 1 + suggestions.size) % suggestions.size
+                            true
+                        }
+                        event.key == Key.Enter || event.key == Key.NumPadEnter -> {
+                            performAction()
+                            true
+                        }
+                        else -> false
+                    }
+                }
+                .background(Surface, RoundedCornerShape(14.dp))
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            decorationBox = { innerTextField ->
+                if (text.isEmpty()) {
+                    Text(placeholder, color = Muted, fontSize = 15.sp)
+                }
+                innerTextField()
+            },
+        )
+    }
+}
+
+@Composable
+private fun TaskBreakdownPanel(
+    breakdown: TaskBreakdown,
+    onChange: (TaskBreakdown) -> Unit,
+) {
+    Column(
         modifier = Modifier
             .widthIn(max = 340.dp)
+            .background(Surface, RoundedCornerShape(14.dp))
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onChange(breakdown.toggleExpanded()) }
+                .padding(horizontal = 4.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "Task breakdown",
+                    color = OnSurface,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    breakdown.title,
+                    color = Muted,
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                )
+            }
+            Text(
+                "${breakdown.completedCount}/${breakdown.items.size}",
+                color = Muted,
+                fontSize = 13.sp,
+            )
+            Spacer(Modifier.width(10.dp))
+            Text(
+                if (breakdown.isExpanded) "▲" else "▼",
+                color = Accent,
+                fontSize = 12.sp,
+            )
+        }
+
+        if (breakdown.isExpanded) {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 220.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                breakdown.items.forEach { item ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onChange(breakdown.toggleItem(item.id)) }
+                            .padding(vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Checkbox(
+                            checked = item.isCompleted,
+                            onCheckedChange = { onChange(breakdown.toggleItem(item.id)) },
+                        )
+                        Text(
+                            item.text,
+                            color = if (item.isCompleted) Muted else OnSurface,
+                            fontSize = 14.sp,
+                            textDecoration =
+                                if (item.isCompleted) TextDecoration.LineThrough else null,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ToolMenu(
+    tools: List<ThreadTool>,
+    highlightedIndex: Int,
+    onSelect: (ThreadTool) -> Unit,
+) {
+    Column(
+        modifier = Modifier
             .fillMaxWidth()
             .background(Surface, RoundedCornerShape(14.dp))
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        decorationBox = { innerTextField ->
-            if (text.isEmpty()) {
-                Text("Type a message...", color = Muted, fontSize = 15.sp)
+            .padding(6.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        tools.forEachIndexed { index, tool ->
+            val definition = tool.definition
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        if (index == highlightedIndex) Color(0xFF2A4052) else Color.Transparent,
+                        RoundedCornerShape(10.dp),
+                    )
+                    .clickable { onSelect(tool) }
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    definition.command,
+                    color = Accent,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.width(88.dp),
+                )
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        definition.displayName,
+                        color = OnSurface,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    Text(definition.description, color = Muted, fontSize = 12.sp)
+                }
             }
-            innerTextField()
-        },
-    )
+        }
+    }
 }
 
 /**

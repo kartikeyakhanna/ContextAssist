@@ -19,6 +19,8 @@ import androidx.savedstate.SavedStateRegistry
 import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
+import com.thread.app.tools.ToolExecutionState
+import com.thread.app.tools.ToolInvocation
 import com.thread.engine.Arbiter
 import com.thread.engine.model.Offer
 import com.thread.engine.model.OfferKind
@@ -68,10 +70,21 @@ class OverlayController(private val context: Context) {
         arbiter: Arbiter,
         showTextInput: Boolean = false,
         onTextSubmitted: (String) -> Unit = {},
+        initialToolState: ToolExecutionState = ToolExecutionState.Idle,
+        onToolStateChanged: (ToolExecutionState) -> Unit = {},
+        onToolInvoked: (ToolInvocation, (ToolExecutionState) -> Unit) -> Unit = { _, _ -> },
     ) {
         when (offer) {
             is Offer.Pin -> showPin(offer, arbiter)
-            else -> showCard(offer, arbiter, showTextInput, onTextSubmitted)
+            else -> showCard(
+                offer = offer,
+                arbiter = arbiter,
+                showTextInput = showTextInput,
+                onTextSubmitted = onTextSubmitted,
+                initialToolState = initialToolState,
+                onToolStateChanged = onToolStateChanged,
+                onToolInvoked = onToolInvoked,
+            )
         }
     }
 
@@ -80,6 +93,9 @@ class OverlayController(private val context: Context) {
         arbiter: Arbiter,
         showTextInput: Boolean,
         onTextSubmitted: (String) -> Unit,
+        initialToolState: ToolExecutionState,
+        onToolStateChanged: (ToolExecutionState) -> Unit,
+        onToolInvoked: (ToolInvocation, (ToolExecutionState) -> Unit) -> Unit,
     ) {
         hideCard()
         cardView = composeOverlay(
@@ -102,6 +118,9 @@ class OverlayController(private val context: Context) {
                 },
                 showTextInput = showTextInput,
                 onTextSubmitted = onTextSubmitted,
+                initialToolState = initialToolState,
+                onToolStateChanged = onToolStateChanged,
+                onToolInvoked = onToolInvoked,
             )
         }
     }

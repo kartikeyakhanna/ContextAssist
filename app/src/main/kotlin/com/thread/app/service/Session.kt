@@ -1,5 +1,6 @@
 package com.thread.app.service
 
+import com.thread.app.tools.ToolExecutionState
 import com.thread.engine.OfferComposer
 import com.thread.engine.TaskStateBuilder
 
@@ -34,6 +35,9 @@ class Session(
 
     /** Most recent text submitted from the resumption card, held in memory only. */
     var latestSubmittedText: String? = null
+
+    /** Current tool request and output for this app, held in memory only. */
+    var toolExecutionState: ToolExecutionState = ToolExecutionState.Idle
 
     /** True once there is something worth restoring, rather than just a presence. */
     fun hasContext(): Boolean =

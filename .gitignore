@@ -21,3 +21,6 @@ study/results/
 # file that happened to be lying around during a verification run.
 /shot*.png
 /*.png
+
+# Local Firebase project configuration
+/app/google-services.json

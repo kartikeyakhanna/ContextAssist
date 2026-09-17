@@ -104,9 +104,11 @@ Android AccessibilityService  (Tier 1: any app, zero integration)
   Overlay  (non-focusable — never takes input from the app beneath)
 ```
 
-**Everything runs on device.** The engine is a pure-Kotlin module with no network
-dependency, and there is **no database anywhere in this repository** — the privacy
-claim is meant to be verifiable by reading the code, not taken on trust.
+**Detection and resumption run on device.** The engine is a pure-Kotlin module with
+no network dependency, and there is **no database anywhere in this repository**.
+The optional `@breakdown` tool sends only the task the user explicitly submits and
+a generic intent label through Firebase AI Logic to Gemini; behavioural signals
+and captured field values remain on-device.
 
 ### Why the accessibility layer, not an Office add-in
 
@@ -150,6 +152,39 @@ is specific to a phone: there is no second window, so a value read elsewhere is
 gone by the time you are back.
 
 ## Build
+
+### Configure Firebase AI Logic
+
+The optional `@breakdown` tool uses Firebase AI Logic with the Gemini Developer
+API. Core detection and resumption continue to work without Firebase.
+
+1. In the Firebase console, create or select a project on the no-cost Spark plan.
+2. Open **Firebase AI Logic**, choose the **Gemini Developer API**, and enable it.
+3. Register an Android app with package name `com.thread.app`.
+4. Download `google-services.json` and place it at:
+
+   ```text
+   app/google-services.json
+   ```
+
+5. Rebuild and reinstall the app.
+
+`google-services.json` is ignored by this repository. The app uses the stable
+free-tier `gemini-3.7-flash` model. No OpenRouter key, local proxy, or PowerShell
+server is required.
+
+Firebase AI Logic enforces App Check for new projects. Debug builds use Firebase's
+debug App Check provider:
+
+1. Run the debug app and submit one `@breakdown` request.
+2. In Android Studio Logcat, filter for `DebugAppCheckProvider`.
+3. Copy the generated debug token.
+4. In Firebase Console, open **App Check**, use **Manage debug tokens** for
+   `com.thread.app`, and register the token.
+
+Release builds use Play Integrity. Before distributing through Google Play,
+register the release signing certificate's SHA-256 fingerprint in Firebase App
+Check. Never ship the debug provider or commit a debug token.
 
 The Android SDK for this project lives inside the repo at `.tooling/android-sdk`
 and nothing was installed system-wide.
