@@ -19,6 +19,7 @@ import androidx.savedstate.SavedStateRegistry
 import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
+import com.thread.app.tools.BreakdownContext
 import com.thread.app.tools.ToolExecutionState
 import com.thread.app.tools.ToolInvocation
 import com.thread.engine.Arbiter
@@ -70,6 +71,7 @@ class OverlayController(private val context: Context) {
         arbiter: Arbiter,
         showTextInput: Boolean = false,
         onTextSubmitted: (String) -> Unit = {},
+        breakdownContext: BreakdownContext? = null,
         initialToolState: ToolExecutionState = ToolExecutionState.Idle,
         onToolStateChanged: (ToolExecutionState) -> Unit = {},
         onToolInvoked: (ToolInvocation, (ToolExecutionState) -> Unit) -> Unit = { _, _ -> },
@@ -81,6 +83,7 @@ class OverlayController(private val context: Context) {
                 arbiter = arbiter,
                 showTextInput = showTextInput,
                 onTextSubmitted = onTextSubmitted,
+                breakdownContext = breakdownContext,
                 initialToolState = initialToolState,
                 onToolStateChanged = onToolStateChanged,
                 onToolInvoked = onToolInvoked,
@@ -93,6 +96,7 @@ class OverlayController(private val context: Context) {
         arbiter: Arbiter,
         showTextInput: Boolean,
         onTextSubmitted: (String) -> Unit,
+        breakdownContext: BreakdownContext?,
         initialToolState: ToolExecutionState,
         onToolStateChanged: (ToolExecutionState) -> Unit,
         onToolInvoked: (ToolInvocation, (ToolExecutionState) -> Unit) -> Unit,
@@ -118,6 +122,7 @@ class OverlayController(private val context: Context) {
                 },
                 showTextInput = showTextInput,
                 onTextSubmitted = onTextSubmitted,
+                breakdownContext = breakdownContext,
                 initialToolState = initialToolState,
                 onToolStateChanged = onToolStateChanged,
                 onToolInvoked = onToolInvoked,

@@ -34,11 +34,13 @@ nothing to surveil, because there is no inference about the person being made.
 **If an optional model-assisted feature is enabled, submitted task content leaves the device.**
 
 For `@breakdown`, the Android app sends the task the user explicitly submitted and
-the session's generic intent label through Firebase AI Logic to Gemini. It does
-not send captured field values, decisions, behavioural scores, package history,
-identifiers, or the full `TaskState`. On the Gemini Developer API free tier,
-submitted content may be used by Google to improve its products; do not submit
-sensitive task text in that configuration.
+the session's generic intent label through Firebase AI Logic to Gemini. The user
+may separately opt in to include a bounded preview of visible, non-editable screen
+labels. Password fields, editable fields, blocked sensitive apps, decisions,
+behavioural scores, package history, identifiers, and the full `TaskState` are
+never sent. On the Gemini Developer API free tier, submitted content may be used
+by Google to improve its products; do not submit sensitive task or screen text in
+that configuration.
 
 Mitigations, in order of preference:
 
@@ -46,9 +48,15 @@ Mitigations, in order of preference:
    resumption card with no model call.
 2. **The user initiates every model request.** Typing and submitting `@breakdown`
    is the explicit action that sends the task.
-3. **Send the minimum.** Only the submitted task and generic intent label are sent;
-   observed field values and behavioural state stay on-device.
-4. State it precisely: *"behavioural signals never leave the device; text submitted
+3. **Screen context is separately consented.** The checkbox is off by default and
+   previews the labels that would be included. The exact snapshot is kept only in
+   the in-memory tool request so retrying cannot silently expand its scope.
+4. **Send the minimum.** Without that checkbox, only the submitted task and generic
+   intent label are sent. With it, at most 20 deduplicated labels and 1,500
+   characters are added. Empty editable fields may contribute their visible label
+   or hint, but fields containing entered text and all password fields are
+   excluded before the network boundary.
+5. State it precisely: *"behavioural signals never leave the device; text submitted
    to an optional AI tool is sent to its configured model only when invoked."*
 
 Side benefit: the demo survives a dead network or a flaky API key.

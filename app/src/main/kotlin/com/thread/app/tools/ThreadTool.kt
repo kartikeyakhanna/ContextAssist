@@ -27,6 +27,7 @@ interface ThreadTool {
 data class ToolInvocation(
     val tool: ThreadTool,
     val input: String,
+    val screenContext: BreakdownContext? = null,
 )
 
 sealed interface ToolResult {

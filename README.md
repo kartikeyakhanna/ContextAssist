@@ -170,8 +170,15 @@ API. Core detection and resumption continue to work without Firebase.
 5. Rebuild and reinstall the app.
 
 `google-services.json` is ignored by this repository. The app uses the stable
-free-tier `gemini-3.7-flash` model. No OpenRouter key, local proxy, or PowerShell
-server is required.
+free-tier `gemini-3.8-flash` model and falls back once to
+`gemini-3.5-flash-lite` after a transient capacity or rate-limit failure. No
+OpenRouter key, local proxy, or PowerShell server is required.
+
+`@breakdown` sends the submitted task and generic app label. Its optional screen
+context checkbox is off by default and previews the visible labels that would be
+included. The collector includes labels for empty form fields but excludes their
+entered values and all password fields, refuses content from apps blocked by
+`SensitiveApps`, and bounds each snapshot to 20 labels and 1,500 characters.
 
 Firebase AI Logic enforces App Check for new projects. Debug builds use Firebase's
 debug App Check provider:

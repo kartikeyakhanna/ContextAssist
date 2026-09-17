@@ -16,6 +16,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import com.thread.app.overlay.OverlayController
 import com.thread.app.tools.BreakdownClient
 import com.thread.app.tools.BreakdownClientException
+import com.thread.app.tools.BreakdownContext
 import com.thread.app.tools.ToolExecutionState
 import com.thread.app.tools.ToolResult
 import com.thread.engine.Arbiter
@@ -52,8 +53,9 @@ import kotlinx.coroutines.launch
  * a line of code.
  *
  * Nothing observed here is persisted. Behavioural signals stay on-device. When
- * the user explicitly invokes @breakdown, only that submitted task and the generic
- * session intent are sent through Firebase AI Logic to Gemini.
+ * the user explicitly invokes @breakdown, only that submitted task, the generic
+ * session intent, and any visible labels they explicitly include are sent through
+ * Firebase AI Logic to Gemini.
  */
 class ThreadAccessibilityService : AccessibilityService() {
 
@@ -534,11 +536,13 @@ class ThreadAccessibilityService : AccessibilityService() {
     fun onDotTapped(now: Long) {
         val session = sessions.get(currentPackage ?: return) ?: return
         val offer = OfferComposer.resumption(session.builder.state, triggeredBy = null)
+        val breakdownContext = captureBreakdownContext(session)
         overlay.show(
             offer = arbiter.userRequested(offer, now),
             arbiter = arbiter,
             showTextInput = true,
             onTextSubmitted = { text -> session.latestSubmittedText = text },
+            breakdownContext = breakdownContext,
             initialToolState = session.toolExecutionState,
             onToolStateChanged = { state -> session.toolExecutionState = state },
             onToolInvoked = { invocation, onStateChanged ->
@@ -566,6 +570,7 @@ class ThreadAccessibilityService : AccessibilityService() {
                 val breakdown = breakdownClient.generate(
                     task = effectiveInvocation.input,
                     intent = intent,
+                    screenContext = effectiveInvocation.screenContext,
                 )
                 ToolExecutionState.Success(
                     requestId = requestId,
@@ -576,7 +581,7 @@ class ThreadAccessibilityService : AccessibilityService() {
                 ToolExecutionState.Failure(
                     requestId = requestId,
                     invocation = effectiveInvocation,
-                    message = error.message ?: "Gemini returned an invalid response.",
+                    message = error.message ?: "The AI service returned an invalid response.",
                 )
             } catch (error: CancellationException) {
                 throw error
@@ -590,6 +595,15 @@ class ThreadAccessibilityService : AccessibilityService() {
                 onStateChanged(completedState)
             }
         }
+    }
+
+    private fun captureBreakdownContext(session: Session): BreakdownContext? {
+        if (!SensitiveApps.readContent(session.packageName)) return null
+        return ScreenContextCollector.capture(
+            root = rootInActiveWindow,
+            appName = appLabel(session.packageName),
+            expectedPackage = session.packageName,
+        )
     }
 
     fun latestSubmittedText(): String? =

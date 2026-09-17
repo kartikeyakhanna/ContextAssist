@@ -41,6 +41,8 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.thread.app.tools.BreakdownContext
+import com.thread.app.tools.BreakdownTool
 import com.thread.app.tools.TaskBreakdown
 import com.thread.app.tools.ThreadTool
 import com.thread.app.tools.ToolExecutionState
@@ -100,6 +102,7 @@ fun ThreadSurface(
     onNever: () -> Unit,
     showTextInput: Boolean = false,
     onTextSubmitted: (String) -> Unit = {},
+    breakdownContext: BreakdownContext? = null,
     initialToolState: ToolExecutionState = ToolExecutionState.Idle,
     onToolStateChanged: (ToolExecutionState) -> Unit = {},
     onToolInvoked: (ToolInvocation, (ToolExecutionState) -> Unit) -> Unit = { _, _ -> },
@@ -146,6 +149,7 @@ fun ThreadSurface(
                 if (showTextInput) {
                     UserTextInputBar(
                         fallbackTask = offer.intent,
+                        breakdownContext = breakdownContext,
                         onSubmit = onTextSubmitted,
                         onToolInvoked = ::invokeTool,
                     )
@@ -214,11 +218,13 @@ private fun ToolFailurePanel(
 @Composable
 private fun UserTextInputBar(
     fallbackTask: String,
+    breakdownContext: BreakdownContext?,
     onSubmit: (String) -> Unit,
     onToolInvoked: (ToolInvocation) -> Unit,
 ) {
     var text by remember { mutableStateOf("") }
     var highlightedIndex by remember { mutableStateOf(0) }
+    var includeScreenContext by remember { mutableStateOf(false) }
 
     val suggestions = ToolInput.activeQuery(text)
         ?.let(ToolRegistry::search)
@@ -244,14 +250,18 @@ private fun UserTextInputBar(
         highlightedIndex = 0
 
         ToolInput.invocation(submitted)?.let { invocation ->
+            val effectiveInvocation = if (invocation.input.isBlank()) {
+                invocation.copy(input = fallbackTask)
+            } else {
+                invocation
+            }
             onToolInvoked(
-                if (invocation.input.isBlank()) {
-                    invocation.copy(input = fallbackTask)
-                } else {
-                    invocation
-                },
+                effectiveInvocation.copy(
+                    screenContext = breakdownContext.takeIf { includeScreenContext },
+                ),
             )
         }
+        includeScreenContext = false
     }
 
     Column(
@@ -263,6 +273,14 @@ private fun UserTextInputBar(
                 tools = suggestions,
                 highlightedIndex = highlightedIndex.coerceIn(suggestions.indices),
                 onSelect = ::selectTool,
+            )
+        }
+
+        if (selectedTool == BreakdownTool) {
+            ScreenContextConsent(
+                context = breakdownContext,
+                checked = includeScreenContext,
+                onCheckedChange = { includeScreenContext = it },
             )
         }
 
@@ -307,6 +325,55 @@ private fun UserTextInputBar(
                 innerTextField()
             },
         )
+    }
+}
+
+@Composable
+private fun ScreenContextConsent(
+    context: BreakdownContext?,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    val available = !context?.visibleLabels.isNullOrEmpty()
+    val preview = context?.visibleLabels
+        ?.take(3)
+        ?.joinToString(" • ")
+        .orEmpty()
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Surface, RoundedCornerShape(14.dp))
+            .clickable(enabled = available) { onCheckedChange(!checked) }
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Checkbox(
+            checked = checked,
+            enabled = available,
+            onCheckedChange = onCheckedChange,
+        )
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                "Include visible screen context",
+                color = if (available) OnSurface else Muted,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+            )
+            Text(
+                if (available) {
+                    "Shares non-editable labels: $preview"
+                } else {
+                    "No safe readable labels are available"
+                },
+                color = Muted,
+                fontSize = 11.sp,
+                maxLines = 2,
+            )
+        }
     }
 }
 
