@@ -1,11 +1,14 @@
 package com.thread.app.overlay
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -100,6 +103,16 @@ fun ThreadSurface(
     onAccept: () -> Unit,
     onDismiss: () -> Unit,
     onNever: () -> Unit,
+    /**
+     * Ask the sequencer for the next action on the screen behind the card.
+     *
+     * Returns its answer rather than taking a callback because the sequencer is
+     * deterministic and on-device: there is no round trip to wait for, so there
+     * is no loading state to model. Null means the screen has no order to work
+     * through. Supplied only for a card the user opened; an offer that appeared
+     * on its own keeps the buttons that let them stop it appearing.
+     */
+    onNext: (() -> Offer.NextStep?)? = null,
     showTextInput: Boolean = false,
     onTextSubmitted: (String) -> Unit = {},
     breakdownContext: BreakdownContext? = null,
@@ -110,6 +123,8 @@ fun ThreadSurface(
     when (offer) {
         is Offer.Resumption -> {
             var toolState by remember(initialToolState) { mutableStateOf(initialToolState) }
+            var nextStep by remember { mutableStateOf<Offer.NextStep?>(null) }
+            var noSequence by remember { mutableStateOf(false) }
 
             fun updateToolState(updated: ToolExecutionState) {
                 toolState = updated
@@ -128,20 +143,45 @@ fun ThreadSurface(
             }
 
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                ResumptionCard(offer, onAccept, onDismiss, onNever)
+                ResumptionCard(
+                    offer = offer,
+                    onAccept = onAccept,
+                    onDismiss = onDismiss,
+                    onNever = onNever,
+                    onNext = onNext?.let {
+                        {
+                            val found = it()
+                            nextStep = found
+                            noSequence = found == null
+                        }
+                    },
+                )
+                nextStep?.let { step ->
+                    NextStepCard(step, onDismiss = { nextStep = null })
+                }
+                if (noSequence) {
+                    // Said plainly rather than dressed up as a suggestion. Inventing
+                    // a step for a screen that has no sequence is the one failure
+                    // that would make this worse than silence.
+                    ToolFailurePanel(
+                        title = "Nothing to sequence here",
+                        message = "This screen is not a form, so there is no order " +
+                            "to work through. Nothing here has been changed.",
+                        onRetry = { noSequence = false },
+                        retryLabel = "Close",
+                    )
+                }
                 when (val current = toolState) {
                     ToolExecutionState.Idle -> Unit
                     is ToolExecutionState.Loading -> ToolStatusPanel(
                         title = "Generating steps...",
                         message = current.invocation.input,
                     )
-                    is ToolExecutionState.Success -> {
-                        val result = current.result
-                        if (result is ToolResult.Breakdown) {
-                            TaskBreakdownPanel(result.value, ::updateBreakdown)
-                        }
+                    is ToolExecutionState.Success -> when (val result = current.result) {
+                        is ToolResult.Breakdown -> TaskBreakdownPanel(result.value, ::updateBreakdown)
                     }
                     is ToolExecutionState.Failure -> ToolFailurePanel(
+                        title = "Could not generate steps",
                         message = current.message,
                         onRetry = { invokeTool(current.invocation) },
                     )
@@ -189,8 +229,10 @@ private fun ToolStatusPanel(
 
 @Composable
 private fun ToolFailurePanel(
+    title: String,
     message: String,
     onRetry: () -> Unit,
+    retryLabel: String = "Retry",
 ) {
     Column(
         modifier = Modifier
@@ -200,14 +242,14 @@ private fun ToolFailurePanel(
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Text(
-            "Could not generate steps",
+            title,
             color = OnSurface,
             fontSize = 15.sp,
             fontWeight = FontWeight.SemiBold,
         )
         Text(message, color = Muted, fontSize = 13.sp)
         Text(
-            "Retry",
+            retryLabel,
             color = Accent,
             fontSize = 14.sp,
             fontWeight = FontWeight.Medium,
@@ -514,12 +556,22 @@ private fun ToolMenu(
  * is useful, but restoring *why* is what stops them re-deliberating a decision
  * they already made before the interruption.
  */
+/**
+ * The two shapes this card takes.
+ *
+ * An offer that appeared on its own must carry its own off-switch - "Not now"
+ * teaches the arbiter it was wrong, "Never" stops that kind outright, and an
+ * unbidden overlay without either is the pattern this project exists to avoid.
+ * A card the user opened by tapping the dot needs neither: they asked, and
+ * closing it is already the answer. That space goes to "Next" instead.
+ */
 @Composable
 fun ResumptionCard(
     offer: Offer.Resumption,
     onAccept: () -> Unit,
     onDismiss: () -> Unit,
     onNever: () -> Unit,
+    onNext: (() -> Unit)? = null,
 ) {
     Column(
         modifier = Modifier
@@ -547,19 +599,29 @@ fun ResumptionCard(
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier.clickable(onClick = onAccept),
             )
-            Text(
-                "Not now",
-                color = Muted,
-                fontSize = 15.sp,
-                modifier = Modifier.clickable(onClick = onDismiss),
-            )
-            Spacer(Modifier.width(4.dp))
-            Text(
-                "Never",
-                color = Muted,
-                fontSize = 15.sp,
-                modifier = Modifier.clickable(onClick = onNever),
-            )
+            if (onNext != null) {
+                Text(
+                    "Next",
+                    color = Accent,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.clickable(onClick = onNext),
+                )
+            } else {
+                Text(
+                    "Not now",
+                    color = Muted,
+                    fontSize = 15.sp,
+                    modifier = Modifier.clickable(onClick = onDismiss),
+                )
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    "Never",
+                    color = Muted,
+                    fontSize = 15.sp,
+                    modifier = Modifier.clickable(onClick = onNever),
+                )
+            }
         }
     }
 }
@@ -650,6 +712,22 @@ private fun NextStepCard(offer: Offer.NextStep, onDismiss: () -> Unit) {
             modifier = Modifier.clickable(onClick = onDismiss),
         )
     }
+}
+
+/**
+ * The ring drawn over the real control on the screen beneath.
+ *
+ * Deliberately an outline and not a fill or a spotlight: the user still has to
+ * read the control's own label to act on it, so covering it or dimming the rest
+ * of the screen would remove the very thing they are being sent to.
+ */
+@Composable
+fun TargetRing() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .border(2.dp, Accent, RoundedCornerShape(8.dp)),
+    )
 }
 
 /** Sequencing is a lens over the form, never a deletion. Every field stays reachable. */
