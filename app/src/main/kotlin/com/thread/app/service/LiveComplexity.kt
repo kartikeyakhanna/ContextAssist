@@ -47,6 +47,7 @@ object LiveComplexity {
                 isEnabled = node.isEnabled,
                 isChecked = node.isChecked,
                 bounds = node.screenBounds(),
+                className = node.className?.toString(),
             ),
         )
 

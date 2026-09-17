@@ -10,6 +10,14 @@ object BreakdownTool : ThreadTool {
     )
 }
 
+/**
+ * Reducing the screen to the next single action is not a tool.
+ *
+ * It was one briefly, as `@next`. It is a button on the card instead, because
+ * making someone type a command to find out what to do next asks for exactly
+ * the composure they have run out of - and because the sequencer takes no
+ * input, so there was nothing for the text bar to carry.
+ */
 object ToolRegistry {
     private val registered: List<ThreadTool> = listOf(
         BreakdownTool,

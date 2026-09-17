@@ -318,4 +318,102 @@ class SequencerTest {
 
         assertNull(Sequencer.plan(nodes), "there is nothing left to say")
     }
+
+    /**
+     * The demo travel form, whose radio group is the shape that produced the bug:
+     * three options, one decision, one heading drawn above them.
+     */
+    private fun radio(label: String, checked: Boolean = false, top: Int) = listOf(
+        VisibleNode(
+            isCheckable = true,
+            isChecked = checked,
+            className = "android.widget.RadioButton",
+            bounds = LiveFacts.Bounds(54, top, 180, top + 126),
+        ),
+        VisibleNode(text = label, bounds = LiveFacts.Bounds(220, top + 40, 400, top + 86)),
+    )
+
+    private fun destinationForm(chosen: String? = null) =
+        listOf(
+            field("Purpose of travel", top = 408),
+            field("Travel dates", top = 600),
+            VisibleNode(text = "Destination", bounds = LiveFacts.Bounds(53, 844, 226, 884)),
+        ) +
+            radio("Delhi", chosen == "Delhi", top = 927) +
+            radio("Bengaluru", chosen == "Bengaluru", top = 1100) +
+            radio("Hyderabad", chosen == "Hyderabad", top = 1273)
+
+    @Test
+    fun `a radio group is one step, not one per option`() {
+        val plan = assertNotNull(Sequencer.plan(destinationForm()))
+
+        assertEquals(
+            listOf("Purpose of travel", "Travel dates", "Destination"),
+            plan.steps.map { it.label },
+        )
+        assertEquals(3, plan.total, "three options are three ways to answer, not three questions")
+    }
+
+    @Test
+    fun `choosing one option finishes the whole group`() {
+        val plan = assertNotNull(Sequencer.plan(destinationForm(chosen = "Delhi")))
+
+        assertTrue(
+            plan.steps.none { it.label in setOf("Destination", "Bengaluru", "Hyderabad") },
+            "the rejected alternatives are not unfinished work",
+        )
+        assertEquals(1, plan.completed)
+    }
+
+    @Test
+    fun `a group is pointed at as a whole`() {
+        val plan = assertNotNull(Sequencer.plan(destinationForm()))
+        val group = assertNotNull(plan.steps.first { it.label == "Destination" }.bounds)
+
+        assertEquals(927, group.top, "from the first option")
+        assertEquals(1273 + 126, group.bottom, "to the last")
+    }
+
+    @Test
+    fun `independent checkboxes stay separate steps`() {
+        val nodes = listOf(
+            field("Policy number", top = 100),
+            field("Amount", top = 200),
+            check("Email me a copy", top = 300),
+            check("Text me a copy", top = 400),
+        )
+
+        val plan = assertNotNull(Sequencer.plan(nodes))
+
+        assertTrue("Email me a copy" in plan.steps.map { it.label })
+        assertTrue("Text me a copy" in plan.steps.map { it.label })
+    }
+
+    @Test
+    fun `two separated radio groups are not merged`() {
+        val nodes = listOf(
+            field("Purpose of travel", top = 100),
+            field("Travel dates", top = 200),
+            VisibleNode(text = "Destination", bounds = LiveFacts.Bounds(53, 300, 226, 340)),
+        ) +
+            radio("Delhi", top = 360) +
+            listOf(VisibleNode(text = "Cabin", bounds = LiveFacts.Bounds(53, 900, 226, 940))) +
+            radio("Economy", top = 1000)
+
+        val plan = assertNotNull(Sequencer.plan(nodes))
+
+        assertTrue("Destination" in plan.steps.map { it.label })
+        assertTrue("Cabin" in plan.steps.map { it.label })
+    }
+
+    @Test
+    fun `an unheaded group is skipped rather than named after one option`() {
+        val nodes = listOf(field("Policy number", top = 100), field("Amount", top = 200)) +
+            radio("Delhi", top = 900) +
+            radio("Bengaluru", top = 1073)
+
+        val plan = assertNotNull(Sequencer.plan(nodes))
+
+        assertEquals(listOf("Policy number", "Amount"), plan.steps.map { it.label })
+    }
 }

@@ -51,6 +51,12 @@ object LiveFacts {
         val isEnabled: Boolean = true,
         val isChecked: Boolean = false,
         val bounds: Bounds? = null,
+        /**
+         * The platform widget name, used only to tell a mutually exclusive choice
+         * from an independent one. A radio group is several controls and a single
+         * decision; a row of checkboxes is several of each.
+         */
+        val className: String? = null,
     )
 
     /**

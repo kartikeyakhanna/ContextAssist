@@ -14,6 +14,7 @@ import android.provider.Settings
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
 import com.thread.app.overlay.OverlayController
 import com.thread.app.tools.BreakdownClient
 import com.thread.app.tools.BreakdownClientException
@@ -24,6 +25,7 @@ import com.thread.engine.OfferComposer
 import com.thread.engine.Sequencer
 import com.thread.engine.TaskStateBuilder
 import com.thread.engine.Triggers
+import com.thread.engine.model.Offer
 import com.thread.engine.Weights
 import com.thread.engine.model.AppSwitchAway
 import com.thread.engine.model.AppSwitchReturn
@@ -183,7 +185,12 @@ class ThreadAccessibilityService : AccessibilityService() {
 
         when (e.eventType) {
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> onWindowChanged(pkg, e, now)
-            AccessibilityEvent.TYPE_VIEW_SCROLLED -> onScrolled(pkg, e, now)
+            AccessibilityEvent.TYPE_VIEW_SCROLLED -> {
+                // The ring is drawn at fixed screen coordinates, so anything that
+                // moves content under it invalidates it immediately.
+                if (!isSystemSurface(pkg)) clearRing()
+                onScrolled(pkg, e, now)
+            }
 
             // Fires constantly, and is the only signal some apps give that the
             // user is typing. Throttled rather than handled on every one.
@@ -209,10 +216,14 @@ class ThreadAccessibilityService : AccessibilityService() {
                 }
             }
 
-            AccessibilityEvent.TYPE_VIEW_CLICKED -> sessions.get(pkg)?.let {
-                it.postReturn.onProductiveAction(now)
-                it.orbit.onCommit(now)
-                it.freeze.onSelect()
+            AccessibilityEvent.TYPE_VIEW_CLICKED -> {
+                // They acted. The step has been taken, so stop pointing at it.
+                if (!isSystemSurface(pkg)) clearRing()
+                sessions.get(pkg)?.let {
+                    it.postReturn.onProductiveAction(now)
+                    it.orbit.onCommit(now)
+                    it.freeze.onSelect()
+                }
             }
         }
     }
@@ -681,14 +692,78 @@ class ThreadAccessibilityService : AccessibilityService() {
             userRequested = true,
             onTextSubmitted = { text -> session.latestSubmittedText = text },
             initialToolState = session.toolExecutionState,
-            onToolStateChanged = { state -> session.toolExecutionState = state },
-            onToolInvoked = { invocation, onStateChanged ->
-                executeTool(session, invocation, onStateChanged)
+            onToolStateChanged = { state ->
+                session.toolExecutionState = state
+                // Dismissing the step takes the ring with it.
+                if (state is ToolExecutionState.Idle) overlay.hideTarget()
             },
+            onToolInvoked = { invocation, onStateChanged ->
+                executeBreakdown(session, invocation, onStateChanged)
+            },
+            onNext = { executeNextStep(session) },
         )
     }
 
-    private fun executeTool(
+    /** Guarded: events can arrive before the overlay exists. */
+    private fun clearRing() {
+        if (::overlay.isInitialized) overlay.hideTarget()
+    }
+
+    /**
+     * The next single action on the screen behind the card.
+     *
+     * Runs entirely on device and returns immediately: no model, no network, no
+     * quota, nothing to fail. That is the point of it being deterministic - the
+     * user asked where to start, and an answer that depends on a round trip is
+     * an answer that sometimes does not arrive.
+     *
+     * Returns the step rather than routing it through the tool state machine,
+     * because the sequencer is synchronous: there is no request to track and no
+     * loading state to show. Null means this screen has no order to work
+     * through, which the card then says in as many words.
+     */
+    private fun executeNextStep(session: Session): Offer.NextStep? {
+        val nodes = LiveComplexity.flatten(hostWindowRoot(session.packageName))
+        val plan = Sequencer.plan(nodes)
+        val offer = plan?.let { OfferComposer.nextStep(it, triggeredBy = null) }
+
+        Log.d(
+            TAG,
+            "next[${session.packageName}]: nodes=${nodes.size} " +
+                "plan=${plan?.let { "${it.position}/${it.total} next='${it.next?.label}'" } ?: "none"} " +
+                "target=${offer?.target}",
+        )
+
+        if (offer == null) overlay.hideTarget() else overlay.showTarget(offer.target)
+        return offer
+    }
+
+    /**
+     * The node tree of the app the user is looking at, not of whatever holds focus.
+     *
+     * [rootInActiveWindow] follows input focus, and the card that asked the
+     * question is itself focusable - so at the moment this runs, the active
+     * window can be Thread's own overlay or the keyboard. Asking for the app's
+     * window by name is the difference between a step that describes the user's
+     * screen and one that confidently describes ours.
+     */
+    private fun hostWindowRoot(pkg: String): AccessibilityNodeInfo? {
+        val named = runCatching {
+            windows
+                .asSequence()
+                .filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
+                .mapNotNull { window -> runCatching { window.root }.getOrNull() }
+                .firstOrNull { it.packageName?.toString() == pkg }
+        }.getOrNull()
+        if (named != null) return named
+
+        // Only if it is still the app in question. A root from the wrong package
+        // is worse than none: it produces a plan that looks entirely plausible.
+        val active = rootInActiveWindow
+        return if (active?.packageName?.toString() == pkg) active else null
+    }
+
+    private fun executeBreakdown(
         session: Session,
         invocation: com.thread.app.tools.ToolInvocation,
         onStateChanged: (ToolExecutionState) -> Unit,

@@ -5,6 +5,7 @@ import android.content.Context
 import android.graphics.PixelFormat
 import android.os.Bundle
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import androidx.compose.ui.platform.ComposeView
@@ -25,6 +26,7 @@ import com.thread.engine.Arbiter
 import com.thread.engine.model.Offer
 import com.thread.engine.model.OfferKind
 import com.thread.engine.model.OfferOutcome
+import com.thread.engine.scores.LiveFacts
 
 /**
  * Draws Thread's surfaces on top of whatever app the user is in.
@@ -45,6 +47,7 @@ class OverlayController(private val context: Context) {
     private var cardView: View? = null
     private var pinView: View? = null
     private var dotView: View? = null
+    private var targetView: View? = null
 
     /**
      * Whether the card currently on screen was asked for, rather than offered.
@@ -81,6 +84,7 @@ class OverlayController(private val context: Context) {
         arbiter: Arbiter,
         showTextInput: Boolean = false,
         userRequested: Boolean = false,
+        onNext: (() -> Offer.NextStep?)? = null,
         onTextSubmitted: (String) -> Unit = {},
         initialToolState: ToolExecutionState = ToolExecutionState.Idle,
         onToolStateChanged: (ToolExecutionState) -> Unit = {},
@@ -96,6 +100,7 @@ class OverlayController(private val context: Context) {
                     arbiter = arbiter,
                     showTextInput = showTextInput,
                     userRequested = userRequested,
+                    onNext = onNext,
                     onTextSubmitted = onTextSubmitted,
                     initialToolState = initialToolState,
                     onToolStateChanged = onToolStateChanged,
@@ -110,6 +115,7 @@ class OverlayController(private val context: Context) {
         arbiter: Arbiter,
         showTextInput: Boolean,
         userRequested: Boolean,
+        onNext: (() -> Offer.NextStep?)?,
         onTextSubmitted: (String) -> Unit,
         initialToolState: ToolExecutionState,
         onToolStateChanged: (ToolExecutionState) -> Unit,
@@ -120,6 +126,21 @@ class OverlayController(private val context: Context) {
         cardView = composeOverlay(
             gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL,
             focusable = showTextInput,
+            // Tapping the screen behind the card puts it away, and the same tap
+            // still reaches the control underneath. That is what makes the ring
+            // usable: the user taps the field it points at and starts typing,
+            // rather than closing us first and then finding the field again.
+            //
+            // Recorded as IGNORED, not accepted. Someone reaching past the card
+            // to get on with their work has not told us we were right, and
+            // counting it as agreement would flatter the one number - accepted
+            // over shown - that says whether this helps anyone.
+            onOutsideTouch = {
+                if (!userRequested) {
+                    arbiter.record(offer.kind, OfferOutcome.IGNORED, System.currentTimeMillis())
+                }
+                hideCard()
+            },
         ) {
             ThreadSurface(
                 offer = offer,
@@ -137,6 +158,7 @@ class OverlayController(private val context: Context) {
                 },
                 showTextInput = showTextInput,
                 onTextSubmitted = onTextSubmitted,
+                onNext = onNext,
                 initialToolState = initialToolState,
                 onToolStateChanged = onToolStateChanged,
                 onToolInvoked = onToolInvoked,
@@ -199,6 +221,7 @@ class OverlayController(private val context: Context) {
         hideCard()
         hidePin()
         hideDot()
+        hideTarget()
     }
 
     private fun hideDot() {
@@ -210,6 +233,9 @@ class OverlayController(private val context: Context) {
         cardView?.let { runCatching { windowManager.removeView(it) } }
         cardView = null
         cardIsUserRequested = false
+        // The ring is the card's pointing finger. It must never outlive the
+        // sentence that explains what it is pointing at.
+        hideTarget()
     }
 
     private fun hidePin() {
@@ -217,10 +243,79 @@ class OverlayController(private val context: Context) {
         pinView = null
     }
 
+    /**
+     * A ring around the control the next step refers to.
+     *
+     * This is the part that makes it navigation rather than instruction: the
+     * user looks where the ring is instead of reading a sentence and then
+     * searching the screen for what it named.
+     *
+     * It draws over the app and changes nothing in it. No view is moved, hidden
+     * or disabled, and every other control stays exactly where the user left it.
+     */
+    fun showTarget(bounds: LiveFacts.Bounds?) {
+        hideTarget()
+        if (bounds == null) return
+
+        val width = bounds.right - bounds.left
+        val height = bounds.bottom - bounds.top
+        if (width <= 0 || height <= 0) return
+
+        val owner = OverlayLifecycleOwner().apply { onCreate() }
+        val view = ComposeView(context).apply {
+            setViewTreeLifecycleOwner(owner)
+            setViewTreeViewModelStoreOwner(owner)
+            setViewTreeSavedStateRegistryOwner(owner)
+            setContent { TargetRing() }
+        }
+
+        val params = WindowManager.LayoutParams(
+            width,
+            height,
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+            // NOT_TOUCHABLE is load-bearing. Without it the ring would swallow
+            // taps on the one control it exists to send the user to.
+            //
+            // LAYOUT_IN_SCREEN is what makes the coordinates mean the same thing
+            // as the ones the node reported. getBoundsInScreen measures from the
+            // true top of the display; without this flag the overlay is laid out
+            // below the status bar, and the ring lands a status bar's height low
+            // - which on this screen is one form field, the most plausible and
+            // most misleading error it could make.
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT,
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = bounds.left
+            y = bounds.top
+        }
+
+        runCatching { windowManager.addView(view, params) }
+            .onSuccess {
+                owner.onStart()
+                targetView = view
+            }
+    }
+
+    /**
+     * Cleared whenever the screen may have moved under it.
+     *
+     * A ring at stale coordinates is worse than no ring: it points, with the same
+     * confidence, at whatever has scrolled into that position instead.
+     */
+    fun hideTarget() {
+        targetView?.let { runCatching { windowManager.removeView(it) } }
+        targetView = null
+    }
+
     @SuppressLint("InflateParams")
     private fun composeOverlay(
         gravity: Int,
         focusable: Boolean = false,
+        onOutsideTouch: (() -> Unit)? = null,
         content: @androidx.compose.runtime.Composable () -> Unit,
     ): View {
         val owner = OverlayLifecycleOwner().apply { onCreate() }
@@ -232,12 +327,30 @@ class OverlayController(private val context: Context) {
             setContent { content() }
         }
 
-        val flags = WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
-            if (focusable) {
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
-            } else {
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+        if (onOutsideTouch != null) {
+            view.setOnTouchListener { _, event ->
+                if (event.action == MotionEvent.ACTION_OUTSIDE) {
+                    onOutsideTouch()
+                    true
+                } else {
+                    false
+                }
             }
+        }
+
+        var flags = if (focusable) {
+            // NO_LIMITS is deliberately absent here. A focusable window that
+            // ignores insets tells the keyboard there is no navigation bar to
+            // leave room for, so the keyboard draws over Back and Home - and
+            // the user cannot leave the screen without first dealing with us.
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+        } else {
+            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+        }
+        if (onOutsideTouch != null) {
+            flags = flags or WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
+        }
 
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
