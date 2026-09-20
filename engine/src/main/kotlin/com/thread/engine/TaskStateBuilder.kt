@@ -3,6 +3,7 @@ package com.thread.engine
 import com.thread.engine.model.AppSwitchAway
 import com.thread.engine.model.AppSwitchReturn
 import com.thread.engine.model.Decision
+import com.thread.engine.model.DocumentPlace
 import com.thread.engine.model.FieldCommit
 import com.thread.engine.model.FieldSnapshot
 import com.thread.engine.model.IdleStart
@@ -72,6 +73,20 @@ class TaskStateBuilder(
 
     fun setNextAction(next: String?): TaskState {
         state = state.copy(nextAction = next)
+        return state
+    }
+
+    /**
+     * Records where in a document the user was writing.
+     *
+     * Only ever replaced, never accumulated: there is one cursor, and keeping a
+     * history of everywhere it has been would turn a memory aid into a keystroke
+     * log. A null candidate leaves the last known place standing, because moving
+     * focus to Thread's own overlay collapses the selection in the app behind it -
+     * and that must not erase the thing the user came back for.
+     */
+    fun setPlace(place: DocumentPlace?): TaskState {
+        if (place != null) state = state.copy(place = place)
         return state
     }
 

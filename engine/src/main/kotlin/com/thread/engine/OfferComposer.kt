@@ -29,6 +29,7 @@ object OfferComposer {
             next = state.nextAction,
             awayFor = describeAway(state),
             triggeredBy = triggeredBy,
+            place = describePlace(state),
         )
 
     /**
@@ -162,8 +163,22 @@ object OfferComposer {
         return recent.joinToString(", ") { "${it.label}: ${it.value}" }
     }
 
-    fun pin(state: TaskState, triggeredBy: Score?): Offer.Pin? {
-        val lookup = state.mostFetchedLookup() ?: return null
+    /**
+     * Where they were writing, quoted back.
+     *
+     * The line number and the words do different jobs and both are needed: the
+     * number lets someone scroll to the place, and the fragment is what restarts
+     * the sentence. Quoted, because it is the user's own writing and must not read
+     * as Thread's description of it.
+     */
+    private fun describePlace(state: TaskState): String? {
+        val place = state.place ?: return null
+        val where = place.documentName?.let { "$it, line ${place.line}" }
+            ?: "Line ${place.line}"
+        return "$where - \u201c${place.snippet}\u201d"
+    }
+
+    fun pin(state: TaskState, triggeredBy: Score?): Offer.Pin? {        val lookup = state.mostFetchedLookup() ?: return null
         return Offer.Pin(label = lookup.label, value = lookup.value, triggeredBy = triggeredBy)
     }
 

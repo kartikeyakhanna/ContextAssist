@@ -60,10 +60,10 @@ import kotlinx.coroutines.launch
  * a line of code.
  *
  * Nothing observed here is persisted. Behavioural signals stay on-device. When
- * the user explicitly invokes @breakdown, only that submitted task and the
- * user explicitly invokes @breakdown, the active Office app, visible context, and
- * any text selection exposed by the Office accessibility tree are sent to the
- * configured breakdown service.
+ * the user explicitly invokes @breakdown, the submitted task, the session's
+ * intent label, and - only with the separate screen-context consent - the active
+ * app, a bounded preview of visible labels, and any exposed text selection are
+ * sent to the configured breakdown service.
  */
 class ThreadAccessibilityService : AccessibilityService() {
 
@@ -92,6 +92,7 @@ class ThreadAccessibilityService : AccessibilityService() {
     private val main = Handler(Looper.getMainLooper())
     private var sdkReceiver: SdkEventReceiver? = null
     private var documentReceiver: BroadcastReceiver? = null
+    private var probeReceiver: BroadcastReceiver? = null
 
     /** Resolved once the service connects; see [isSystemSurface]. */
     private var imePackage: String? = null
@@ -181,6 +182,36 @@ class ThreadAccessibilityService : AccessibilityService() {
             @Suppress("UnspecifiedRegisterReceiverFlag")
             registerReceiver(receiver, filter)
         }
+
+        if (PROBE_DUMP) registerProbeReceiver()
+    }
+
+    /**
+     * Measurement aid. Dumps the tree on demand rather than on an event, because
+     * the question being asked - does an app populate its canvas only when a
+     * screen reader is attached - has to be asked with a screen reader running,
+     * and that is exactly the situation where driving the device by touch, or by
+     * uiautomator, stops being reliable. A broadcast needs neither.
+     */
+    private fun registerProbeReceiver() {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                val pkg = intent?.getStringExtra("pkg")
+                val root = if (pkg != null) hostWindowRoot(pkg) else rootInActiveWindow
+                val summary = NodeTreeProbe.summarise(root)
+                Log.i("ThreadProbe", "on-demand dump pkg=${pkg ?: "active"} $summary")
+                NodeTreeProbe.dump(root)
+            }
+        }
+        probeReceiver = receiver
+
+        val filter = IntentFilter(PROBE_DUMP_ACTION)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
+        } else {
+            @Suppress("UnspecifiedRegisterReceiverFlag")
+            registerReceiver(receiver, filter)
+        }
     }
 
     private fun registerDocumentReceiver() {
@@ -219,10 +250,29 @@ class ThreadAccessibilityService : AccessibilityService() {
         val now = System.currentTimeMillis()
         val pkg = e.packageName?.toString() ?: return
 
+        // Measurement aid, off by default. Answers what an app volunteers, which
+        // is a different question from what it exposes when read - so the tree is
+        // dumped alongside, on arrival at a screen.
+        if (PROBE_EVENTS && !isSystemSurface(pkg)) {
+            NodeTreeProbe.logEvent(e, pkg)
+            if (e.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+                NodeTreeProbe.dump(hostWindowRoot(pkg))
+            }
+        }
+
         textCapture.flushIdle(now)
 
         when (e.eventType) {
-            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> onWindowChanged(pkg, e, now)
+            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
+                onWindowChanged(pkg, e, now)
+                // Records what the document looked like before anything was typed.
+                // Without this the first edit after Thread starts has nothing to be
+                // compared against and silently produces no place - which is exactly
+                // the moment someone would be judging whether the thing works.
+                if (OfficeApps.exposesDocumentText(pkg) && SensitiveApps.readContent(pkg)) {
+                    PlaceCapture.seed(hostWindowRoot(pkg), pkg)
+                }
+            }
             AccessibilityEvent.TYPE_VIEW_SCROLLED -> {
                 // The ring is drawn at fixed screen coordinates, so anything that
                 // moves content under it invalidates it immediately.
@@ -232,8 +282,15 @@ class ThreadAccessibilityService : AccessibilityService() {
 
             // Fires constantly, and is the only signal some apps give that the
             // user is typing. Throttled rather than handled on every one.
+            //
+            // System surfaces are excluded because the keyboard emits these while
+            // the user types and the throttle is shared: measured on device, the
+            // IME consumed every read window and the app being typed into never
+            // got one. The capture looked implemented and captured nothing.
             AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED ->
-                if (SensitiveApps.readContent(pkg)) captureFocusedField(pkg, now)
+                if (!isSystemSurface(pkg) && SensitiveApps.readContent(pkg)) {
+                    captureFocusedField(pkg, now)
+                }
 
             AccessibilityEvent.TYPE_VIEW_FOCUSED -> sessions.get(pkg)?.let {
                 it.postReturn.onFocus(now)
@@ -256,7 +313,10 @@ class ThreadAccessibilityService : AccessibilityService() {
 
             AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED -> {
                 if (OfficeApps.isSupported(pkg) && SensitiveApps.readContent(pkg)) {
-                    sessions.get(pkg)?.rememberSelectedText(SelectionCapture.fromEvent(e))
+                    sessions.get(pkg)?.let { session ->
+                        session.rememberSelectedText(SelectionCapture.fromEvent(e))
+                        rememberPlace(session, runCatching { e.source }.getOrNull(), now)
+                    }
                 }
             }
 
@@ -298,9 +358,20 @@ class ThreadAccessibilityService : AccessibilityService() {
         if (now - lastFocusReadAt < focusReadMs) return
         lastFocusReadAt = now
 
+        // A document app being typed into is a task worth holding even if Thread
+        // never saw the user arrive - which happens whenever the service starts
+        // while the app is already open, and would otherwise silently disable the
+        // whole document beat.
+        if (OfficeApps.exposesDocumentText(pkg)) {
+            val session = sessions.get(pkg) ?: openSession(pkg, "$pkg/document", now)
+            val place = PlaceCapture.fromRoot(hostWindowRoot(pkg), pkg, session.documentName, now)
+            place?.let { session.builder.setPlace(it) }
+        }
+
         val focused = runCatching {
             rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
-        }.getOrNull() ?: return
+        }.getOrNull()
+        if (focused == null) return
 
         textCapture.onFocusedNode(pkg, focused, now)
         scheduleTextFlush()
@@ -780,19 +851,36 @@ class ThreadAccessibilityService : AccessibilityService() {
      * through, which the card then says in as many words.
      */
     private fun executeNextStep(session: Session): Offer.NextStep? {
-        val nodes = LiveComplexity.flatten(hostWindowRoot(session.packageName))
+        val nodes = LiveComplexity.flattenForm(hostWindowRoot(session.packageName))
         val plan = Sequencer.plan(nodes)
         val offer = plan?.let { OfferComposer.nextStep(it, triggeredBy = null) }
+        val target = offer?.target?.takeIf { it.isOnScreen() }
 
         Log.d(
             TAG,
             "next[${session.packageName}]: nodes=${nodes.size} " +
                 "plan=${plan?.let { "${it.position}/${it.total} next='${it.next?.label}'" } ?: "none"} " +
-                "target=${offer?.target}",
+                "target=${offer?.target} ringed=${target != null}",
         )
 
-        if (offer == null) overlay.hideTarget() else overlay.showTarget(offer.target)
+        if (target == null) overlay.hideTarget() else overlay.showTarget(target)
         return offer
+    }
+
+    /**
+     * Whether a ring drawn here would land on the control it names.
+     *
+     * A target can now be below the fold, because the sequencer reads the whole
+     * form rather than the viewport. It can also be larger than the screen - a
+     * group of twenty-five options is one decision, and its bounds are the whole
+     * list. In both cases the card still names the step; only the pointing stops.
+     * A ring clamped to the screen edge would point, with the same confidence,
+     * at whatever happens to be there.
+     */
+    private fun LiveFacts.Bounds.isOnScreen(): Boolean {
+        val metrics = resources.displayMetrics
+        return top >= 0 && left >= 0 &&
+            bottom <= metrics.heightPixels && right <= metrics.widthPixels
     }
 
     /**
@@ -867,8 +955,32 @@ class ThreadAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun captureBreakdownContext(session: Session): BreakdownContext? {
-        val appName = OfficeApps.displayName(session.packageName) ?: return null
+    /**
+     * Keeps the line the user was writing, for apps that expose one.
+     *
+     * Cheap enough to run on every cursor move because it reads one node and does
+     * arithmetic - no tree walk, no model call. The builder keeps only the latest,
+     * so this replaces rather than accumulates.
+     */
+    /**
+     * Keeps the line the user was writing, for apps that expose one.
+     *
+     * Driven from the focused node rather than from a text-changed event, for the
+     * same reason [TextCapture.onFocusedNode] is: measured on device, this demo
+     * editor emits no TYPE_VIEW_TEXT_CHANGED at all while typing. An implementation
+     * hung off that event looks correct in review and captures nothing in use.
+     *
+     * Cheap enough to run on the throttled focus read because it reads one node and
+     * does arithmetic - no tree walk, no model call.
+     */
+    private fun rememberPlace(session: Session, node: AccessibilityNodeInfo?, now: Long) {
+        if (!OfficeApps.exposesDocumentText(session.packageName)) return
+        val place = PlaceCapture.fromNode(node, session.documentName, now)
+        if (place == null) return
+        session.builder.setPlace(place)
+    }
+
+    private fun captureBreakdownContext(session: Session): BreakdownContext? {        val appName = OfficeApps.displayName(session.packageName) ?: return null
         if (!SensitiveApps.readContent(session.packageName)) return null
         return ScreenContextCollector.capture(
             root = hostWindowRoot(session.packageName),
@@ -952,10 +1064,17 @@ class ThreadAccessibilityService : AccessibilityService() {
 
     /** "what you were doing in Excel" reads better than a package name. */
     private fun appLabel(packageName: String): String {
-        val label = runCatching {
-            val info = packageManager.getApplicationInfo(packageName, 0)
-            packageManager.getApplicationLabel(info).toString()
-        }.getOrNull() ?: packageName.substringAfterLast('.')
+        // Android 11 package visibility means getApplicationInfo returns nothing for
+        // apps Thread has not declared an interest in, and the fallback then puts a
+        // raw package fragment on the card - "worddemo" rather than the app's name.
+        // Broadening <queries> to fix that would buy a cosmetic gain with the right
+        // to enumerate the device, so the known names are used first instead.
+        val label = OfficeApps.displayName(packageName)
+            ?: runCatching {
+                val info = packageManager.getApplicationInfo(packageName, 0)
+                packageManager.getApplicationLabel(info).toString()
+            }.getOrNull()
+            ?: packageName.substringAfterLast('.')
 
         return "what you were doing in $label"
     }
@@ -978,6 +1097,7 @@ class ThreadAccessibilityService : AccessibilityService() {
         main.removeCallbacksAndMessages(ORBIT_TOKEN)
         main.removeCallbacksAndMessages(FREEZE_TOKEN)
         textCapture.forget(target)
+        PlaceCapture.forget(target)
         sessions.remove(target)
         refreshDot()
     }
@@ -989,6 +1109,7 @@ class ThreadAccessibilityService : AccessibilityService() {
         main.removeCallbacksAndMessages(FREEZE_TOKEN)
         sessions.clear()
         textCapture.clear()
+        PlaceCapture.clear()
         currentPackage = null
         cardPackage = null
         if (::overlay.isInitialized) overlay.hide()
@@ -1015,6 +1136,8 @@ class ThreadAccessibilityService : AccessibilityService() {
         sdkReceiver = null
         documentReceiver?.let { runCatching { unregisterReceiver(it) } }
         documentReceiver = null
+        probeReceiver?.let { runCatching { unregisterReceiver(it) } }
+        probeReceiver = null
         super.onDestroy()
     }
 
@@ -1075,6 +1198,25 @@ class ThreadAccessibilityService : AccessibilityService() {
 
     private companion object {
         const val TAG = "Thread"
+
+        /**
+         * Dump every event from every observed app to the log.
+         *
+         * Never true in a build anyone uses: it logs the text of everything on
+         * screen, which is precisely the thing this project promises not to do.
+         * Flipped on by hand, for a measurement, and flipped back.
+         */
+        const val PROBE_EVENTS = false
+
+        /**
+         * Registers an on-demand tree dump, triggered by broadcast.
+         *
+         * Same hazard as [PROBE_EVENTS] - it logs screen content - so it carries
+         * the same rule: on by hand for a measurement, off before anything ships.
+         */
+        const val PROBE_DUMP = false
+        const val PROBE_DUMP_ACTION = "com.thread.app.PROBE_DUMP"
+
         val RETURN_TOKEN = Any()
         val ORBIT_TOKEN = Any()
         val TEXT_TOKEN = Any()

@@ -1,6 +1,7 @@
 package com.thread.app.service
 
 import android.util.Log
+import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 
 /**
@@ -23,6 +24,36 @@ object NodeTreeProbe {
 
     private const val TAG = "ThreadProbe"
 
+    /**
+     * Every event an app emits, with everything attached to it.
+     *
+     * The node-tree probe answers "what can Thread read if it goes looking".
+     * This answers the other half: "what does the app volunteer". They are not
+     * the same question, and an app can be silent in one channel and talkative
+     * in the other - Excel's grid exposes no nodes at all, so if a cell
+     * reference is available anywhere it is here.
+     *
+     * Deliberately dumps the raw event rather than a tidied summary. The point
+     * of a probe is to find the thing nobody thought to look for.
+     */
+    fun logEvent(event: AccessibilityEvent, pkg: String) {
+        val source = runCatching { event.source }.getOrNull()
+        Log.i(
+            TAG,
+            "$pkg ${AccessibilityEvent.eventTypeToString(event.eventType)} " +
+                "cls=${event.className?.toString()?.substringAfterLast('.') ?: "-"} " +
+                "text=${event.text.joinToString("|").ifBlank { "-" }} " +
+                "desc=${event.contentDescription ?: "-"} " +
+                "srcId=${source?.viewIdResourceName?.substringAfterLast('/') ?: "-"} " +
+                "srcText=${source?.text ?: "-"} " +
+                "srcDesc=${source?.contentDescription ?: "-"} " +
+                "sel=${source?.textSelectionStart}..${source?.textSelectionEnd} " +
+                "editable=${source?.isEditable} " +
+                "from=${event.fromIndex} to=${event.toIndex} " +
+                "item=${event.currentItemIndex} count=${event.itemCount}",
+        )
+    }
+
     fun dump(root: AccessibilityNodeInfo?, maxDepth: Int = 12) {
         if (root == null) {
             Log.w(TAG, "no root node - app exposes nothing to the accessibility layer")
@@ -43,6 +74,7 @@ object NodeTreeProbe {
     data class Summary(
         var totalNodes: Int = 0,
         var withText: Int = 0,
+        var withDesc: Int = 0,
         var withViewId: Int = 0,
         var editable: Int = 0,
         var clickable: Int = 0,
@@ -55,6 +87,7 @@ object NodeTreeProbe {
         if (depth > max) return
         s.totalNodes++
         if (!node.text.isNullOrBlank()) s.withText++
+        if (!node.contentDescription.isNullOrBlank()) s.withDesc++
         if (!node.viewIdResourceName.isNullOrBlank()) s.withViewId++
         if (node.isEditable) s.editable++
         if (node.isClickable) s.clickable++
@@ -71,6 +104,7 @@ object NodeTreeProbe {
             "$pad${node.className?.toString()?.substringAfterLast('.')} " +
                 "id=${node.viewIdResourceName?.substringAfterLast('/') ?: "-"} " +
                 "text=${node.text?.take(40) ?: "-"} " +
+                "desc=${node.contentDescription?.take(40) ?: "-"} " +
                 "editable=${node.isEditable} clickable=${node.isClickable}",
         )
         for (i in 0 until node.childCount) {

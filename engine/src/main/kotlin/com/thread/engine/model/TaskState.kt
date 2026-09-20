@@ -31,6 +31,8 @@ data class TaskState(
     val errorCounts: Map<String, Int> = emptyMap(),
     /** Values the user left the app to read. Candidates for pinning. */
     val lookups: List<ValueLookup> = emptyList(),
+    /** Where in a document the user was writing. Null unless the app exposes it. */
+    val place: DocumentPlace? = null,
     val lastEventAt: Long = startedAt,
 ) {
     val interruptionCount: Int get() = interruptions.size
@@ -58,6 +60,28 @@ data class FieldSnapshot(
     val label: String,
     val value: String,
     val committedAt: Long,
+)
+
+/**
+ * The line someone was writing, and roughly where it sat.
+ *
+ * A document is the one place where naming the screen tells the user nothing:
+ * forty pages are all "Word", so "you were in Word" is a fact they already have.
+ * What an interruption actually takes is the half-formed sentence, so that is
+ * what this holds.
+ *
+ * Deliberately not the document. [snippet] is a bounded window around the cursor
+ * and nothing else is kept, because the point is to hand back the thread of a
+ * thought, not to make a copy of someone's writing in a process they did not
+ * choose to trust. Like everything else in [TaskState] it lives in memory only.
+ */
+data class DocumentPlace(
+    /** 1-based, as a human counts lines. */
+    val line: Int,
+    val snippet: String,
+    /** Null when the app exposes a cursor but not a name for what it is in. */
+    val documentName: String? = null,
+    val updatedAt: Long = 0L,
 )
 
 /**

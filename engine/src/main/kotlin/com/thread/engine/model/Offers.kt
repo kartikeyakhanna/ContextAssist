@@ -29,6 +29,8 @@ sealed interface Offer {
         /** "You were away for 4 minutes" - all Tier 1 can offer, and not nothing. */
         val awayFor: String? = null,
         override val triggeredBy: Score?,
+        /** "Line 12 - ...closes on the" when the app exposes where the cursor was. */
+        val place: String? = null,
     ) : Offer {
         override val kind get() = OfferKind.RESUMPTION
 
@@ -48,7 +50,8 @@ sealed interface Offer {
          * their place that is often the most orientating thing available.
          */
         val hasContent: Boolean
-            get() = done != null || decided != null || next != null || awayFor != null
+            get() = done != null || decided != null || next != null ||
+                awayFor != null || place != null
     }
 
     /** C1: working-memory prosthetic. The value they keep leaving to fetch. */

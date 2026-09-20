@@ -416,4 +416,42 @@ class SequencerTest {
 
         assertEquals(listOf("Policy number", "Amount"), plan.steps.map { it.label })
     }
+
+    /**
+     * The cost-allocation screen: a long option group fills the first screenful
+     * and every editable field sits below it.
+     */
+    private fun allocationForm(visibleOnly: Boolean): List<VisibleNode> {
+        val group = listOf(VisibleNode(text = "Cost centre", bounds = LiveFacts.Bounds(53, 300, 300, 340))) +
+            (0 until 25).flatMap { radio("Centre ${it + 1}", top = 360 + it * 173) }
+        val belowTheFold = listOf(
+            field("Budget code", top = 5000),
+            field("Attachment reference", top = 5200),
+        )
+        return if (visibleOnly) group else group + belowTheFold
+    }
+
+    @Test
+    fun `a form is not a form when only the first screenful is read`() {
+        assertNull(
+            Sequencer.plan(allocationForm(visibleOnly = true)),
+            "one group and nothing else cannot be ordered — which is why sequencing " +
+                "reads past the fold rather than trusting the viewport",
+        )
+    }
+
+    @Test
+    fun `fields below a long option group are still part of the form`() {
+        val plan = assertNotNull(Sequencer.plan(allocationForm(visibleOnly = false)))
+
+        assertEquals(
+            listOf("Cost centre", "Budget code", "Attachment reference"),
+            plan.steps.map { it.label },
+        )
+        assertEquals(
+            "Cost centre",
+            plan.next?.label,
+            "the group comes first because it is first in reading order",
+        )
+    }
 }

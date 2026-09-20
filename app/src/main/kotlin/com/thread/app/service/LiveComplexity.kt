@@ -25,12 +25,44 @@ object LiveComplexity {
         return out
     }
 
-    private fun walk(node: AccessibilityNodeInfo, depth: Int, out: MutableList<LiveFacts.VisibleNode>) {
+    /**
+     * The same tree, plus what the user would see by scrolling.
+     *
+     * Scoring asks "how much is in front of this person right now", so it stops
+     * at the fold. Sequencing asks "what order does this form go in", and the
+     * fold is not where the form ends. Reading only the viewport made the
+     * longest form in the demo report that it was not a form at all: its fields
+     * are below twenty-five cost centres, so nothing editable was in view, and
+     * the honest-sounding "this screen is not a form" was simply false. It also
+     * made the step count move as the user scrolled, which is the one thing a
+     * denominator must never do.
+     *
+     * Widened only inside a scrollable container, and only for nodes that have
+     * been given a size. Content the user can bring into view by scrolling is
+     * part of this screen; a collapsed section or the page behind a tab is not,
+     * and proposing either would send someone looking for a control that is not
+     * there.
+     */
+    fun flattenForm(root: AccessibilityNodeInfo?): List<LiveFacts.VisibleNode> {
+        if (root == null) return emptyList()
+        val out = ArrayList<LiveFacts.VisibleNode>(64)
+        walk(root, 0, out, insideScrollable = false)
+        return out
+    }
+
+    private fun walk(
+        node: AccessibilityNodeInfo,
+        depth: Int,
+        out: MutableList<LiveFacts.VisibleNode>,
+        insideScrollable: Boolean? = null,
+    ) {
         if (depth > MAX_DEPTH || out.size >= MAX_NODES) return
 
         // Nodes the user cannot see are not load. Invisible tabs, off-screen
         // recycler children and collapsed sections all appear in the tree.
-        if (!node.isVisibleToUser) return
+        val reachable = node.isVisibleToUser ||
+            (insideScrollable == true && node.screenBounds() != null)
+        if (!reachable) return
 
         out.add(
             LiveFacts.VisibleNode(
@@ -51,9 +83,10 @@ object LiveComplexity {
             ),
         )
 
+        val childScrollable = insideScrollable?.let { it || node.isScrollable }
         for (i in 0 until node.childCount) {
             val child = runCatching { node.getChild(i) }.getOrNull() ?: continue
-            walk(child, depth + 1, out)
+            walk(child, depth + 1, out, childScrollable)
         }
     }
 
