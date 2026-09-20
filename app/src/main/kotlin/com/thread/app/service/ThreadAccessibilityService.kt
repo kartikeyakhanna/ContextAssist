@@ -1,6 +1,7 @@
 package com.thread.app.service
 
 import android.accessibilityservice.AccessibilityService
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -16,6 +17,7 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import com.thread.app.overlay.OverlayController
+import com.thread.app.document.DocumentImportActivity
 import com.thread.app.tools.BreakdownClient
 import com.thread.app.tools.BreakdownClientException
 import com.thread.app.tools.BreakdownContext
@@ -58,9 +60,10 @@ import kotlinx.coroutines.launch
  * a line of code.
  *
  * Nothing observed here is persisted. Behavioural signals stay on-device. When
- * the user explicitly invokes @breakdown, only that submitted task, the generic
- * session intent, and any visible labels they explicitly include are sent through
- * Firebase AI Logic to Gemini.
+ * the user explicitly invokes @breakdown, only that submitted task and the
+ * user explicitly invokes @breakdown, the active Office app, visible context, and
+ * any text selection exposed by the Office accessibility tree are sent to the
+ * configured breakdown service.
  */
 class ThreadAccessibilityService : AccessibilityService() {
 
@@ -88,6 +91,7 @@ class ThreadAccessibilityService : AccessibilityService() {
 
     private val main = Handler(Looper.getMainLooper())
     private var sdkReceiver: SdkEventReceiver? = null
+    private var documentReceiver: BroadcastReceiver? = null
 
     /** Resolved once the service connects; see [isSystemSurface]. */
     private var imePackage: String? = null
@@ -149,6 +153,7 @@ class ThreadAccessibilityService : AccessibilityService() {
         refreshImePackage()
         resolveLauncherPackages()
         registerSdkReceiver()
+        registerDocumentReceiver()
 
         // Present from the moment the service is on, not from the first app the
         // user happens to open. Nothing is held yet, which is the point: the way
@@ -172,6 +177,37 @@ class ThreadAccessibilityService : AccessibilityService() {
         val filter = IntentFilter(SdkEventReceiver.ACTION)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
+        } else {
+            @Suppress("UnspecifiedRegisterReceiverFlag")
+            registerReceiver(receiver, filter)
+        }
+    }
+
+    private fun registerDocumentReceiver() {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                val event = intent ?: return
+                val name = event.getStringExtra(DocumentImportActivity.EXTRA_DOCUMENT_NAME)
+                    ?.takeIf { it.isNotBlank() }
+                    ?: return
+                val text = event.getStringExtra(DocumentImportActivity.EXTRA_DOCUMENT_TEXT)
+                    ?.takeIf { it.isNotBlank() }
+                    ?: return
+                val pkg = event.getStringExtra(DocumentImportActivity.EXTRA_TARGET_PACKAGE)
+                    ?.takeIf(OfficeApps::isWord)
+                    ?: return
+                val now = System.currentTimeMillis()
+                val session = sessions.get(pkg) ?: openSession(pkg, "$pkg/imported", now)
+                session.attachDocument(name, text)
+                if (overlay.hasUserRequestedCard() && cardPackage == pkg) {
+                    onDotTapped(now)
+                }
+            }
+        }
+        documentReceiver = receiver
+        val filter = IntentFilter(DocumentImportActivity.ACTION_DOCUMENT_IMPORTED)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
         } else {
             @Suppress("UnspecifiedRegisterReceiverFlag")
             registerReceiver(receiver, filter)
@@ -215,6 +251,12 @@ class ThreadAccessibilityService : AccessibilityService() {
                 if (SensitiveApps.readContent(pkg)) {
                     textCapture.onTextChanged(pkg, e, now)
                     scheduleTextFlush()
+                }
+            }
+
+            AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED -> {
+                if (OfficeApps.isSupported(pkg) && SensitiveApps.readContent(pkg)) {
+                    sessions.get(pkg)?.rememberSelectedText(SelectionCapture.fromEvent(e))
                 }
             }
 
@@ -704,6 +746,17 @@ class ThreadAccessibilityService : AccessibilityService() {
             onToolInvoked = { invocation, onStateChanged ->
                 executeBreakdown(session, invocation, onStateChanged)
             },
+            onAttachDocument = {
+                overlay.hideCardsOnly()
+                startActivity(
+                    Intent(this, DocumentImportActivity::class.java)
+                        .putExtra(
+                            DocumentImportActivity.EXTRA_TARGET_PACKAGE,
+                            session.packageName,
+                        )
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            },
             onNext = { executeNextStep(session) },
         )
     }
@@ -815,11 +868,16 @@ class ThreadAccessibilityService : AccessibilityService() {
     }
 
     private fun captureBreakdownContext(session: Session): BreakdownContext? {
+        val appName = OfficeApps.displayName(session.packageName) ?: return null
         if (!SensitiveApps.readContent(session.packageName)) return null
         return ScreenContextCollector.capture(
-            root = rootInActiveWindow,
-            appName = appLabel(session.packageName),
+            root = hostWindowRoot(session.packageName),
+            appName = appName,
             expectedPackage = session.packageName,
+            selectedText = session.selectedText,
+            documentName = session.documentName,
+            documentText = session.documentText,
+            readEditableDocumentText = OfficeApps.exposesDocumentText(session.packageName),
         )
     }
 
@@ -955,6 +1013,8 @@ class ThreadAccessibilityService : AccessibilityService() {
         toolScope.cancel()
         sdkReceiver?.let { runCatching { unregisterReceiver(it) } }
         sdkReceiver = null
+        documentReceiver?.let { runCatching { unregisterReceiver(it) } }
+        documentReceiver = null
         super.onDestroy()
     }
 

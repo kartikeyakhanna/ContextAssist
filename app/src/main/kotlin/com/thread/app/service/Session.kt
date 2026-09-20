@@ -37,6 +37,30 @@ class Session(
     /** Most recent text submitted from the resumption card, held in memory only. */
     var latestSubmittedText: String? = null
 
+    /** Current Office selection, held in memory only until it changes or the session ends. */
+    var selectedText: String? = null
+        private set
+
+    /**
+     * Keep the last meaningful selection. Office can emit a collapsed selection
+     * when focus moves to Thread's overlay; that must not erase the text the user
+     * selected immediately before asking for help.
+     */
+    fun rememberSelectedText(candidate: String?) {
+        if (!candidate.isNullOrBlank()) selectedText = candidate
+    }
+
+    /** User-approved Word document text, imported locally and held in memory only. */
+    var documentName: String? = null
+        private set
+    var documentText: String? = null
+        private set
+
+    fun attachDocument(name: String, text: String) {
+        documentName = name
+        documentText = text
+    }
+
     /** Current tool request and output for this app, held in memory only. */
     var toolExecutionState: ToolExecutionState = ToolExecutionState.Idle
 

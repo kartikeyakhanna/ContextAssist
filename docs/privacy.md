@@ -33,14 +33,26 @@ nothing to surveil, because there is no inference about the person being made.
 
 **If an optional model-assisted feature is enabled, submitted task content leaves the device.**
 
-For `@breakdown`, the Android app sends the task the user explicitly submitted and
-the session's generic intent label through Firebase AI Logic to Gemini. The user
-may separately opt in to include a bounded preview of visible, non-editable screen
-labels. Password fields, editable fields, blocked sensitive apps, decisions,
-behavioural scores, package history, identifiers, and the full `TaskState` are
-never sent. On the Gemini Developer API free tier, submitted content may be used
-by Google to improve its products; do not submit sensitive task or screen text in
-that configuration.
+For `@breakdown`, the Android app sends the task the user explicitly submitted,
+the active Office app, a bounded preview of visible labels, and any selected text
+exposed through Android accessibility APIs. Password fields, blocked sensitive
+apps, decisions, behavioural scores, package history, identifiers, and the full
+`TaskState` are never sent. The current Firebase AI Logic configuration uses the
+Gemini Developer API. On its free tier, submitted content may be used by Google to
+improve its products; do not submit sensitive task or screen text in that
+configuration.
+
+When the user explicitly attaches a `.docx`, Thread reads the Android content URI
+locally and extracts up to 20,000 characters from `word/document.xml`. The file
+and extracted text are not persisted, but the bounded text is included in
+subsequent Word breakdown requests until the in-memory session ends or another
+document replaces it.
+
+The dedicated `com.thread.worddemo` package is the only exception that permits
+automatic reading of editable document text. It contains synthetic demo content
+and intentionally exposes its editor through Android accessibility semantics.
+This exception does not apply to Microsoft Word, Excel, PowerPoint, or arbitrary
+third-party applications.
 
 Mitigations, in order of preference:
 

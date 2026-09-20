@@ -25,6 +25,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -45,7 +46,6 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.thread.app.tools.BreakdownContext
-import com.thread.app.tools.BreakdownTool
 import com.thread.app.tools.TaskBreakdown
 import com.thread.app.tools.ThreadTool
 import com.thread.app.tools.ToolExecutionState
@@ -54,6 +54,7 @@ import com.thread.app.tools.ToolInvocation
 import com.thread.app.tools.ToolRegistry
 import com.thread.app.tools.ToolResult
 import com.thread.engine.model.Offer
+import kotlinx.coroutines.delay
 
 /**
  * The always-available way in.
@@ -119,6 +120,7 @@ fun ThreadSurface(
     initialToolState: ToolExecutionState = ToolExecutionState.Idle,
     onToolStateChanged: (ToolExecutionState) -> Unit = {},
     onToolInvoked: (ToolInvocation, (ToolExecutionState) -> Unit) -> Unit = { _, _ -> },
+    onAttachDocument: () -> Unit = {},
 ) {
     when (offer) {
         is Offer.Resumption -> {
@@ -178,7 +180,11 @@ fun ThreadSurface(
                         message = current.invocation.input,
                     )
                     is ToolExecutionState.Success -> when (val result = current.result) {
-                        is ToolResult.Breakdown -> TaskBreakdownPanel(result.value, ::updateBreakdown)
+                        is ToolResult.Breakdown -> TaskBreakdownPanel(
+                            breakdown = result.value,
+                            onChange = ::updateBreakdown,
+                            onClear = { updateToolState(ToolExecutionState.Idle) },
+                        )
                     }
                     is ToolExecutionState.Failure -> ToolFailurePanel(
                         title = "Could not generate steps",
@@ -192,6 +198,7 @@ fun ThreadSurface(
                         breakdownContext = breakdownContext,
                         onSubmit = onTextSubmitted,
                         onToolInvoked = ::invokeTool,
+                        onAttachDocument = onAttachDocument,
                     )
                 }
             }
@@ -264,10 +271,10 @@ private fun UserTextInputBar(
     breakdownContext: BreakdownContext?,
     onSubmit: (String) -> Unit,
     onToolInvoked: (ToolInvocation) -> Unit,
+    onAttachDocument: () -> Unit,
 ) {
     var text by remember { mutableStateOf("") }
     var highlightedIndex by remember { mutableStateOf(0) }
-    var includeScreenContext by remember { mutableStateOf(false) }
 
     val suggestions = ToolInput.activeQuery(text)
         ?.let(ToolRegistry::search)
@@ -300,11 +307,10 @@ private fun UserTextInputBar(
             }
             onToolInvoked(
                 effectiveInvocation.copy(
-                    screenContext = breakdownContext.takeIf { includeScreenContext },
+                    screenContext = breakdownContext,
                 ),
             )
         }
-        includeScreenContext = false
     }
 
     Column(
@@ -319,11 +325,23 @@ private fun UserTextInputBar(
             )
         }
 
-        if (selectedTool == BreakdownTool) {
-            ScreenContextConsent(
-                context = breakdownContext,
-                checked = includeScreenContext,
-                onCheckedChange = { includeScreenContext = it },
+        if (breakdownContext?.appName == "Microsoft Word") {
+            val documentName = breakdownContext.documentName
+            Text(
+                if (documentName == null) {
+                    "Attach Word document"
+                } else {
+                    "Attached: $documentName · Replace"
+                },
+                color = Accent,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Surface, RoundedCornerShape(12.dp))
+                    .clickable(onClick = onAttachDocument)
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
             )
         }
 
@@ -372,59 +390,19 @@ private fun UserTextInputBar(
 }
 
 @Composable
-private fun ScreenContextConsent(
-    context: BreakdownContext?,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
-) {
-    val available = !context?.visibleLabels.isNullOrEmpty()
-    val preview = context?.visibleLabels
-        ?.take(3)
-        ?.joinToString(" • ")
-        .orEmpty()
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Surface, RoundedCornerShape(14.dp))
-            .clickable(enabled = available) { onCheckedChange(!checked) }
-            .padding(horizontal = 8.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Checkbox(
-            checked = checked,
-            enabled = available,
-            onCheckedChange = onCheckedChange,
-        )
-        Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
-        ) {
-            Text(
-                "Include visible screen context",
-                color = if (available) OnSurface else Muted,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium,
-            )
-            Text(
-                if (available) {
-                    "Shares non-editable labels: $preview"
-                } else {
-                    "No safe readable labels are available"
-                },
-                color = Muted,
-                fontSize = 11.sp,
-                maxLines = 2,
-            )
-        }
-    }
-}
-
-@Composable
 private fun TaskBreakdownPanel(
     breakdown: TaskBreakdown,
     onChange: (TaskBreakdown) -> Unit,
+    onClear: () -> Unit,
 ) {
+    val runningItem = breakdown.items.firstOrNull { it.isTimerRunning }
+    LaunchedEffect(runningItem?.id, runningItem?.remainingSeconds) {
+        if (runningItem != null && runningItem.remainingSeconds > 0) {
+            delay(1_000)
+            onChange(breakdown.tickTimer(runningItem.id))
+        }
+    }
+
     Column(
         modifier = Modifier
             .widthIn(max = 340.dp)
@@ -435,11 +413,14 @@ private fun TaskBreakdownPanel(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable { onChange(breakdown.toggleExpanded()) }
                 .padding(horizontal = 4.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column(modifier = Modifier.weight(1f)) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable { onChange(breakdown.toggleExpanded()) },
+            ) {
                 Text(
                     "Task breakdown",
                     color = OnSurface,
@@ -447,38 +428,48 @@ private fun TaskBreakdownPanel(
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
-                    breakdown.title,
+                    "${breakdown.title} · about ${breakdown.totalEstimateMinutes} min",
                     color = Muted,
                     fontSize = 12.sp,
                     maxLines = 1,
                 )
             }
             Text(
+                "New",
+                color = Accent,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier
+                    .clickable(onClick = onClear)
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+            )
+            Text(
                 "${breakdown.completedCount}/${breakdown.items.size}",
                 color = Muted,
                 fontSize = 13.sp,
+                modifier = Modifier.clickable { onChange(breakdown.toggleExpanded()) },
             )
             Spacer(Modifier.width(10.dp))
             Text(
                 if (breakdown.isExpanded) "▲" else "▼",
                 color = Accent,
                 fontSize = 12.sp,
+                modifier = Modifier.clickable { onChange(breakdown.toggleExpanded()) },
             )
         }
 
         if (breakdown.isExpanded) {
             Column(
                 modifier = Modifier
-                    .heightIn(max = 220.dp)
+                    .heightIn(max = 300.dp)
                     .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 breakdown.items.forEach { item ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { onChange(breakdown.toggleItem(item.id)) }
-                            .padding(vertical = 2.dp),
+                            .padding(vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Checkbox(
@@ -493,11 +484,42 @@ private fun TaskBreakdownPanel(
                                 if (item.isCompleted) TextDecoration.LineThrough else null,
                             modifier = Modifier.weight(1f),
                         )
+                        Spacer(Modifier.width(8.dp))
+                        Column(
+                            horizontalAlignment = Alignment.End,
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
+                            Text(
+                                formatTimer(item.remainingSeconds),
+                                color = if (item.isTimerRunning) Accent else Muted,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                            )
+                            Text(
+                                when {
+                                    item.isCompleted -> "Done"
+                                    item.isTimerRunning -> "Pause"
+                                    item.remainingSeconds == 0 -> "Restart"
+                                    else -> "Start"
+                                },
+                                color = if (item.isCompleted) Muted else Accent,
+                                fontSize = 11.sp,
+                                modifier = Modifier.clickable(enabled = !item.isCompleted) {
+                                    onChange(breakdown.toggleTimer(item.id))
+                                },
+                            )
+                        }
                     }
                 }
             }
         }
     }
+}
+
+private fun formatTimer(totalSeconds: Int): String {
+    val minutes = totalSeconds / 60
+    val seconds = totalSeconds % 60
+    return "%d:%02d".format(minutes, seconds)
 }
 
 @Composable

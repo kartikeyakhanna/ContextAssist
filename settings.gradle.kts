@@ -37,6 +37,7 @@ if (androidSdkAvailable) {
     // without depending on a third-party app behaving a particular way on stage.
     include(":demo")
     include(":lookup")
+    include(":worddemo")
 } else {
     logger.lifecycle("[thread] Android SDK not found - skipping Android modules. Engine still builds and tests.")
 }

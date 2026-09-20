@@ -106,9 +106,32 @@ Android AccessibilityService  (Tier 1: any app, zero integration)
 
 **Detection and resumption run on device.** The engine is a pure-Kotlin module with
 no network dependency, and there is **no database anywhere in this repository**.
-The optional `@breakdown` tool sends only the task the user explicitly submits and
-a generic intent label through Firebase AI Logic to Gemini; behavioural signals
-and captured field values remain on-device.
+The optional `@breakdown` tool sends the task the user explicitly submits to the
+configured AI service; behavioural signals and captured field values remain
+on-device. In Microsoft Word, Excel, and PowerPoint, every tool request also
+includes the active Office app, visible screen context, and text the user has
+selected when Android exposes the selection through accessibility APIs. Selected
+text is treated as the primary context. Each Office app keeps its own checklist:
+switching to Excel does not show Word's list, and returning to Word restores it.
+The **New** action in the checklist header clears only the current app's list.
+
+In Word, **Attach Word document** opens Android's document picker. Word can also
+share a `.docx` copy directly to Thread. The document is parsed locally, bounded
+to 20,000 characters, and held only in the Word session's memory. The AI prompt
+orders context as selected text first, attached document second, and visible
+interface labels last. No public or shareable file URL is required.
+
+For demos that require reliable live document text, `worddemo/` provides a
+Word-like mobile editor. Its editable document body, text selection, save status,
+top formatting ribbon, and bottom navigation tabs are exposed through standard
+Android accessibility semantics. Thread recognizes only this dedicated package
+as safe to read editable document text automatically; real Office applications
+retain the stricter selection-or-attachment behavior.
+
+If a configured model reaches its model-specific quota or is temporarily unavailable,
+the breakdown request automatically rotates through supported stable Flash and
+Flash-Lite models. Quota failures switch models immediately; transient server
+failures use a short jittered delay before trying the next model.
 
 ### Why the accessibility layer, not an Office add-in
 
@@ -138,6 +161,7 @@ app/        Android: AccessibilityService (collector) + Compose overlay (UI).
 sdk/        Tier 2. Six reporting calls an app can make. No keys, nothing returned.
 demo/       "Expense Portal" — the app under observation in the demo.
 lookup/     "Finance Portal" — the other app, so the pin scenario is real.
+worddemo/   Word-like editor with selectable text and accessible toolbar controls.
 config/     weights.json  — every weight, tunable live
             complexity-cache.json — design-time Screen Memory Load per screen
 tools/      complexity-agent — offline screen scorer + ranked report

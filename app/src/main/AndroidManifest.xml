@@ -45,6 +45,17 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".document.DocumentImportActivity"
+            android:exported="true"
+            android:theme="@style/Theme.Thread">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
+            </intent-filter>
+        </activity>
+
         <!--
           The opt-in is enforced by the platform, not by us.
 

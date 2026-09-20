@@ -8,13 +8,14 @@ Ruthless rule: if a beat does not advance Maya's task, cut it.
 
 ## Setup
 
-Three APKs, all built from this repo:
+Four APKs, all built from this repo:
 
 | App | Package | Role |
 |---|---|---|
 | **Thread** | `com.thread.app` | the accessibility service and overlay |
 | **Expense Portal** | `com.thread.demo` | the app under observation |
 | **Finance Portal** | `com.thread.lookup` | the other app, for the pin beat |
+| **Document Editor Demo** | `com.thread.worddemo` | Word-like editor with exposed document text |
 
 ```powershell
 .\.tooling\gradle-9.1.0\bin\gradle.bat assembleDebug
@@ -23,6 +24,7 @@ $adb = ".\.tooling\android-sdk\platform-tools\adb.exe"
 & $adb install -r app\build\outputs\apk\debug\app-debug.apk
 & $adb install -r demo\build\outputs\apk\debug\demo-debug.apk
 & $adb install -r lookup\build\outputs\apk\debug\lookup-debug.apk
+& $adb install -r worddemo\build\outputs\apk\debug\worddemo-debug.apk
 ```
 
 Then **Settings → Accessibility → Thread → On**.
@@ -36,6 +38,23 @@ notifications for everything else.
 
 Expense Portal resets its state each time it is launched from the home screen, so
 the demo is repeatable without uninstalling anything.
+
+### Word-like document context demo
+
+Open **Document Editor Demo**. It contains a realistic proposal and mobile
+document controls for Back, Save status, Undo, Redo, Find, Share, Cut, Copy,
+Paste, Select All, Bold, Italic, Underline, Highlight, Font Color, New Comment,
+and Home/Insert/Draw/Layout/Review/View tabs.
+
+Long-press in the document and select the final paragraph, then tap Thread and
+enter:
+
+> `@breakdown Finish this proposal with a measurable example`
+
+Unlike Word for Android, the demo exposes the editable document body through the
+accessibility tree. Thread sends the selected paragraph as primary context, the
+complete bounded document as supporting context, and visible toolbar labels last.
+No document attachment or URL is required.
 
 ---
 
@@ -97,6 +116,40 @@ Then one sentence from a co-designer with lived experience.
 > "Maya isn't less capable. She just can't afford to rebuild context eleven times
 > a day. We gave her back the thread — and we did it without changing a single
 > line of Excel."
+
+## Word breakdown scenario
+
+Maya is finishing a six-page return-to-work proposal in Microsoft Word. Her
+manager has left comments throughout the document and asked her to strengthen the
+selected paragraph with evidence before sending it at the end of the day. The
+request is important but open-ended: review comments, find supporting numbers,
+rewrite the paragraph, check formatting, proofread, and send.
+
+She selects the paragraph she is currently stuck on, opens Thread, and enters:
+
+> `@breakdown Finish this proposal for my manager`
+
+Thread sends the active app, visible Word context, and selected paragraph with her
+request. A representative result is:
+
+| Step | Estimate |
+|---|---:|
+| Read the manager's comments once without editing | 3 min |
+| List the evidence missing from the selected paragraph | 4 min |
+| Add one concrete result or number | 6 min |
+| Rewrite the selected paragraph in plain language | 8 min |
+| Check headings and document formatting | 4 min |
+| Read the final section aloud and fix errors | 5 min |
+| Save and share the document | 2 min |
+
+Each estimate appears as a countdown beside its step. Maya starts the first timer,
+pauses it when interrupted, and resumes without recalculating where she was. Only
+one timer runs at a time, so the aid creates one current focus rather than another
+set of competing demands.
+
+This demonstrates the neurodiversity value clearly: an ambiguous, emotionally
+heavy task becomes a finite sequence with visible effort, a starting point, and
+permission to work one bounded interval at a time.
 
 ---
 

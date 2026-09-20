@@ -91,6 +91,7 @@ class OverlayController(private val context: Context) {
         initialToolState: ToolExecutionState = ToolExecutionState.Idle,
         onToolStateChanged: (ToolExecutionState) -> Unit = {},
         onToolInvoked: (ToolInvocation, (ToolExecutionState) -> Unit) -> Unit = { _, _ -> },
+        onAttachDocument: () -> Unit = {},
     ) {
         when (offer) {
             is Offer.Pin -> showPin(offer, arbiter)
@@ -109,6 +110,7 @@ class OverlayController(private val context: Context) {
                     initialToolState = initialToolState,
                     onToolStateChanged = onToolStateChanged,
                     onToolInvoked = onToolInvoked,
+                    onAttachDocument = onAttachDocument,
                 )
             }
 
@@ -126,6 +128,7 @@ class OverlayController(private val context: Context) {
         initialToolState: ToolExecutionState,
         onToolStateChanged: (ToolExecutionState) -> Unit,
         onToolInvoked: (ToolInvocation, (ToolExecutionState) -> Unit) -> Unit,
+        onAttachDocument: () -> Unit,
     ) {
         hideCard()
         cardIsUserRequested = userRequested
@@ -169,6 +172,7 @@ class OverlayController(private val context: Context) {
                 initialToolState = initialToolState,
                 onToolStateChanged = onToolStateChanged,
                 onToolInvoked = onToolInvoked,
+                onAttachDocument = onAttachDocument,
             )
         }
     }
