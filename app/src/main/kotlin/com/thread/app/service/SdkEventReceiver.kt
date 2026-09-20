@@ -25,6 +25,7 @@ class SdkEventReceiver(
     private val onEvent: (ThreadEvent) -> Unit,
     private val onTaskStart: (intent: String, packageName: String, screenId: String) -> Unit,
     private val onTaskEnd: () -> Unit,
+    private val onLineBounds: (packageName: String, bounds: android.graphics.Rect?) -> Unit = { _, _ -> },
 ) : BroadcastReceiver() {
 
     override fun onReceive(context: Context?, intent: Intent?) {
@@ -84,6 +85,23 @@ class SdkEventReceiver(
                 onEvent(TaskCommitted(ts = now, screenId = screen))
                 onTaskEnd()
             }
+
+            // Where the line being edited currently sits on screen. Reported by
+            // the app because the platform cannot be asked: its per-character
+            // bounds API is unusable on a Compose text field that scrolls.
+            "line_bounds" -> onLineBounds(
+                screen.substringBefore('/'),
+                if (i.getBooleanExtra("hasBounds", false)) {
+                    android.graphics.Rect(
+                        i.getIntExtra("left", 0),
+                        i.getIntExtra("top", 0),
+                        i.getIntExtra("right", 0),
+                        i.getIntExtra("bottom", 0),
+                    )
+                } else {
+                    null
+                },
+            )
         }
     }
 

@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -54,6 +55,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
@@ -127,12 +129,36 @@ private fun WordLikeEditor() {
     var searchText by remember { mutableStateOf("") }
     var documentLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
     var editorCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
+
+    // Kept as a value rather than read off editorCoordinates: scrolling reuses the
+    // same LayoutCoordinates instance, so only a plain Offset actually changes and
+    // triggers the recompute that keeps the reported line rectangle in step.
+    var editorOrigin by remember { mutableStateOf(Offset.Zero) }
     var draggingSelectionHandle by remember { mutableStateOf(false) }
     var pendingTypedText by remember { mutableStateOf("") }
+    var lastEditOffset by remember { mutableStateOf<Int?>(null) }
     val documentFocusRequester = remember { FocusRequester() }
     val clipboard = LocalClipboardManager.current
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
+    val hostView = androidx.compose.ui.platform.LocalView.current
+
+    // Tells Thread where on screen the line being edited currently sits.
+    //
+    // Thread cannot work this out for itself. The platform's per-character bounds
+    // API is unusable on this field - measured on a Pixel 10 it covers only the
+    // first ~140 characters and reports pre-scroll coordinates - so an app that
+    // knows its own layout has to say. Recomputed whenever the layout or the
+    // scroll position changes, because a stale rectangle would put a highlight
+    // over whichever text had scrolled into that spot.
+    ReportEditedLineBounds(
+        offset = lastEditOffset,
+        layout = documentLayout,
+        editor = editorCoordinates,
+        editorOrigin = editorOrigin,
+        hostView = hostView,
+        context = context,
+    )
 
     fun replaceDocument(updated: TextFieldValue) {
         if (draggingSelectionHandle && updated.text == document.text) return
@@ -156,6 +182,9 @@ private fun WordLikeEditor() {
                 textLength = updated.text.length,
             )
             saveStatus = "Saving"
+            // Where the user was actually writing, which is what the highlight
+            // needs to point at later.
+            lastEditOffset = updated.selection.start
         }
         document = updated
     }
@@ -309,7 +338,9 @@ private fun WordLikeEditor() {
                 .padding(horizontal = 24.dp, vertical = 22.dp),
         ) {
             Column(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Text(
@@ -320,9 +351,11 @@ private fun WordLikeEditor() {
                 )
                 Box(
                     modifier = Modifier
-                        .weight(1f)
                         .fillMaxWidth()
-                        .onGloballyPositioned { editorCoordinates = it },
+                        .onGloballyPositioned {
+                            editorCoordinates = it
+                            editorOrigin = it.positionInWindow()
+                        },
                 ) {
                     CompositionLocalProvider(
                         LocalTextSelectionColors provides TextSelectionColors(
@@ -342,7 +375,7 @@ private fun WordLikeEditor() {
                             ),
                             visualTransformation = SelectionFormattingTransformation(formatRanges),
                             modifier = Modifier
-                                .fillMaxSize()
+                                .fillMaxWidth()
                                 .focusRequester(documentFocusRequester)
                                 .pointerInput(document.text, documentLayout) {
                                     observeDoubleTaps { position ->
@@ -1028,6 +1061,63 @@ private fun RibbonButton(
             },
             fontSize = 9.sp,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+        )
+    }
+}
+
+/**
+ * Reports the screen rectangle of the line containing [offset], or clears it.
+ *
+ * Sends a clear rather than nothing when the line scrolls out of view. A
+ * highlight is a claim about where something is; when that stops being true the
+ * claim has to be withdrawn, not left on screen pointing at the wrong text.
+ */
+@Composable
+private fun ReportEditedLineBounds(
+    offset: Int?,
+    layout: TextLayoutResult?,
+    editor: LayoutCoordinates?,
+    editorOrigin: Offset,
+    hostView: android.view.View,
+    context: android.content.Context,
+) {
+    val rect: android.graphics.Rect? = remember(offset, layout, editorOrigin) {
+        if (offset == null || layout == null || editor == null || !editor.isAttached) {
+            return@remember null
+        }
+        val safeOffset = offset.coerceIn(0, layout.layoutInput.text.length)
+        val line = runCatching { layout.getLineForOffset(safeOffset) }.getOrNull()
+            ?: return@remember null
+
+        val topLeft = editorOrigin
+        // positionInWindow is relative to the window; the overlay is laid out
+        // against the true top of the display, which is the frame the accessibility
+        // bounds elsewhere in Thread already use.
+        val windowOnScreen = IntArray(2).also { hostView.rootView.getLocationOnScreen(it) }
+        val left = topLeft.x + layout.getLineLeft(line) + windowOnScreen[0]
+        val top = topLeft.y + layout.getLineTop(line) + windowOnScreen[1]
+        val right = topLeft.x + layout.getLineRight(line) + windowOnScreen[0]
+        val bottom = topLeft.y + layout.getLineBottom(line) + windowOnScreen[1]
+
+        android.graphics.Rect(
+            left.toInt(),
+            top.toInt(),
+            right.toInt(),
+            bottom.toInt(),
+        ).takeIf { it.width() > 0 && it.height() > 0 }
+    }
+
+    LaunchedEffect(rect) {
+        context.sendBroadcast(
+            Intent(THREAD_SDK_ACTION)
+                .setPackage(THREAD_APP_PACKAGE)
+                .putExtra("type", "line_bounds")
+                .putExtra("screen", "$WORD_DEMO_PACKAGE/document")
+                .putExtra("hasBounds", rect != null)
+                .putExtra("left", rect?.left ?: 0)
+                .putExtra("top", rect?.top ?: 0)
+                .putExtra("right", rect?.right ?: 0)
+                .putExtra("bottom", rect?.bottom ?: 0),
         )
     }
 }

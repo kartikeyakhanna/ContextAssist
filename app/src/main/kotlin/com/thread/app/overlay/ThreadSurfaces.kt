@@ -753,6 +753,22 @@ fun TargetRing() {
     )
 }
 
+/**
+ * A translucent band over the line the user was writing.
+ *
+ * Deliberately tinted rather than outlined. The text underneath has to stay
+ * legible - the point is to let someone find their place and carry on reading,
+ * not to obscure the words they came back for.
+ */
+@Composable
+fun LineHighlight() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Accent.copy(alpha = 0.22f), RoundedCornerShape(4.dp)),
+    )
+}
+
 /** Sequencing is a lens over the form, never a deletion. Every field stays reachable. */
 @Composable
 private fun SequencingOffer(

@@ -49,6 +49,7 @@ class OverlayController(private val context: Context) {
     private var pinView: View? = null
     private var dotView: View? = null
     private var targetView: View? = null
+    private var highlightView: View? = null
 
     /**
      * Whether the card currently on screen was asked for, rather than offered.
@@ -247,6 +248,7 @@ class OverlayController(private val context: Context) {
         // The ring is the card's pointing finger. It must never outlive the
         // sentence that explains what it is pointing at.
         hideTarget()
+        hideLineHighlight()
     }
 
     private fun hidePin() {
@@ -309,6 +311,56 @@ class OverlayController(private val context: Context) {
                 owner.onStart()
                 targetView = view
             }
+    }
+
+    /**
+     * A soft band over the line the user was writing when they were interrupted.
+     *
+     * Draws over the app and changes nothing in it - the document is not scrolled,
+     * selected, or modified, and the text underneath stays exactly as it was. It is
+     * shown with the card and removed with it, because like the ring it is only
+     * meaningful alongside the sentence that explains it.
+     */
+    fun showLineHighlight(bounds: android.graphics.Rect?) {
+        hideLineHighlight()
+        if (bounds == null || bounds.width() <= 0 || bounds.height() <= 0) return
+
+        val owner = OverlayLifecycleOwner().apply { onCreate() }
+        val view = ComposeView(context).apply {
+            setViewTreeLifecycleOwner(owner)
+            setViewTreeViewModelStoreOwner(owner)
+            setViewTreeSavedStateRegistryOwner(owner)
+            setContent { LineHighlight() }
+        }
+
+        val params = WindowManager.LayoutParams(
+            bounds.width(),
+            bounds.height(),
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+            // Same reasoning as the ring: not touchable, so it cannot intercept a
+            // tap meant for the text under it, and laid out in screen coordinates
+            // so the rectangle means what the reporting app said it meant.
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT,
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = bounds.left
+            y = bounds.top
+        }
+
+        runCatching { windowManager.addView(view, params) }
+            .onSuccess {
+                owner.onStart()
+                highlightView = view
+            }
+    }
+
+    fun hideLineHighlight() {
+        highlightView?.let { runCatching { windowManager.removeView(it) } }
+        highlightView = null
     }
 
     /**

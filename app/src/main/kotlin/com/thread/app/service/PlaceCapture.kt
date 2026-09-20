@@ -85,7 +85,27 @@ internal object PlaceCapture {
         documentIn(root)?.let { lastSeen[pkg] = it.text }
     }
 
-    private class Document(val text: String, val cursor: Int?)
+    /**
+     * Why the on-screen position of a line is not read from here.
+     *
+     * The platform has an API for exactly that - refreshWithExtraData with
+     * EXTRA_DATA_TEXT_CHARACTER_LOCATION_KEY - and the demo editor's field even
+     * advertises support for it. Measured on a Pixel 10 it is not usable: it
+     * returns bounds only for roughly the first 140 characters and nothing beyond,
+     * and with the document scrolled to its end it still reported the coordinates
+     * of the first paragraph, which was no longer on screen. The field scrolls
+     * internally and those coordinates do not account for it.
+     *
+     * A highlight drawn from that would sit over whatever text happened to occupy
+     * the position instead - the same failure the ring's own comment warns about,
+     * and worse here because the user cannot easily check. Screen positions are
+     * therefore taken only from apps that report them through the SDK.
+     */
+    private class Document(
+        val node: AccessibilityNodeInfo,
+        val text: String,
+        val cursor: Int?,
+    )
 
     private fun documentIn(root: AccessibilityNodeInfo?): Document? {
         val start = root ?: return null
@@ -117,7 +137,7 @@ internal object PlaceCapture {
         val text = document.text?.toString().orEmpty()
         if (text.isEmpty()) return null
 
-        return Document(text, document.textSelectionStart.takeIf { it >= 0 })
+        return Document(document, text, document.textSelectionStart.takeIf { it >= 0 })
     }
 
     fun fromNode(node: AccessibilityNodeInfo?, documentName: String?, now: Long): DocumentPlace? {

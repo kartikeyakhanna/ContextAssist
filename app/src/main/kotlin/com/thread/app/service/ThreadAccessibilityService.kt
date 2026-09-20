@@ -146,6 +146,15 @@ class ThreadAccessibilityService : AccessibilityService() {
     private val focusReadMs = 350L
     private var lastFocusReadAt = 0L
 
+    /**
+     * The latest on-screen position of the line being edited, per app.
+     *
+     * Only apps that report it through the SDK appear here; nothing is inferred.
+     * Kept as the app's most recent word on the subject, so a highlight shown
+     * later reflects where the line is now rather than where it once was.
+     */
+    private val lineBounds = mutableMapOf<String, android.graphics.Rect?>()
+
     override fun onServiceConnected() {
         super.onServiceConnected()
         overlay = OverlayController(this)
@@ -172,6 +181,7 @@ class ThreadAccessibilityService : AccessibilityService() {
             onEvent = { event -> applyDeclaredEvent(event) },
             onTaskStart = { intent, pkg, screen -> startTask(intent, pkg, screen) },
             onTaskEnd = { endTask() },
+            onLineBounds = { pkg, bounds -> lineBounds[pkg] = bounds },
         )
         sdkReceiver = receiver
 
@@ -549,6 +559,7 @@ class ThreadAccessibilityService : AccessibilityService() {
         dropped.forEach {
             textCapture.forget(it)
             PlaceCapture.forget(it)
+            lineBounds.remove(it)
         }
 
         Log.d(
@@ -837,11 +848,20 @@ class ThreadAccessibilityService : AccessibilityService() {
             },
             onNext = { executeNextStep(session) },
         )
+
+        // Shown only when the card actually says where the user was, so the
+        // highlight and the sentence explaining it always agree.
+        if (offer?.place != null) overlay.showLineHighlight(lineBounds[pkg])
     }
 
     /** Guarded: events can arrive before the overlay exists. */
     private fun clearRing() {
-        if (::overlay.isInitialized) overlay.hideTarget()
+        if (::overlay.isInitialized) {
+            overlay.hideTarget()
+            // Scrolling moves the line out from under the highlight, and the app's
+            // next report may not have arrived yet.
+            overlay.hideLineHighlight()
+        }
     }
 
     /**
@@ -1105,6 +1125,7 @@ class ThreadAccessibilityService : AccessibilityService() {
         main.removeCallbacksAndMessages(FREEZE_TOKEN)
         textCapture.forget(target)
         PlaceCapture.forget(target)
+        lineBounds.remove(target)
         sessions.remove(target)
         refreshDot()
     }
@@ -1117,6 +1138,7 @@ class ThreadAccessibilityService : AccessibilityService() {
         sessions.clear()
         textCapture.clear()
         PlaceCapture.clear()
+        lineBounds.clear()
         currentPackage = null
         cardPackage = null
         if (::overlay.isInitialized) overlay.hide()
