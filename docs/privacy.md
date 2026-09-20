@@ -54,6 +54,19 @@ and intentionally exposes its editor through Android accessibility semantics.
 This exception does not apply to Microsoft Word, Excel, PowerPoint, or arbitrary
 third-party applications.
 
+Within that exception, `PlaceCapture` holds one further copy of document text:
+the last reading of it, kept so the next reading can be compared against it to
+locate where the user was writing. This is not an optimisation that could be
+dropped — a Compose text field reports its contents but reports its cursor as
+-1, so the comparison is the only way to answer the question at all. The copy is
+in memory, is replaced on every reading rather than accumulated, and is dropped
+with the session. It never leaves the device; the resumption card is rendered
+locally and the retained text is not sent to any model.
+
+The line and snippet that reach the card are narrower still: one line of the
+document, windowed to roughly 80 characters around the edit. That fragment is
+shown on the user's own screen and goes nowhere else.
+
 Mitigations, in order of preference:
 
 1. **Core resumption remains local.** `OfferComposer` renders the complete

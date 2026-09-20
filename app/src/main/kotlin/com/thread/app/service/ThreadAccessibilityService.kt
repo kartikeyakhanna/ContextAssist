@@ -543,6 +543,13 @@ class ThreadAccessibilityService : AccessibilityService() {
 
         val dropped = sessions.evict()
         if (dropped.isNotEmpty()) Log.d(TAG, "evicted: $dropped")
+        // Eviction drops the session, and everything read from that app goes with
+        // it. Without this the captured text outlived the session it belonged to,
+        // which is not what "dropped when the task ends" claims.
+        dropped.forEach {
+            textCapture.forget(it)
+            PlaceCapture.forget(it)
+        }
 
         Log.d(
             TAG,
