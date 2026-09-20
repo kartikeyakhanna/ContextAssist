@@ -27,3 +27,6 @@ study/results/
 
 # Kotlin compiler scratch: error dumps and daemon session files from local builds.
 .kotlin/
+
+# Build output, was tracked by mistake and duplicated every engine change.
+engine/bin/
