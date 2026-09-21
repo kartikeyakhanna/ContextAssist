@@ -153,7 +153,125 @@ permission to work one bounded interval at a time.
 
 ---
 
-## Deliberately not demoed
+## Video shot list
+
+Two scenarios, filmed separately, cut together later. Nothing here is a feature
+tour — each one answers a single question a viewer would actually ask.
+
+Everything below has been run on a Pixel 10 and is described as it behaved, not
+as it is meant to behave. Where a shot depends on something fragile, the shot
+says so.
+
+### Before recording, every time
+
+```powershell
+$adb = ".\.tooling\android-sdk\platform-tools\adb.exe"
+& $adb install -r app\build\outputs\apk\debug\app-debug.apk
+& $adb install -r demo\build\outputs\apk\debug\demo-debug.apk
+& $adb shell settings put secure enabled_accessibility_services com.thread.app/.service.ThreadAccessibilityService
+& $adb shell settings put secure accessibility_enabled 1
+& $adb shell am force-stop com.thread.demo
+```
+
+Reinstalling unbinds the service, so the two `settings` lines are not optional.
+Force-stopping matters too: without it `Step1Details.onCreate` never runs again
+and the card has no session to draw. Put the phone in Do Not Disturb except for
+the one app you are going to interrupt with.
+
+---
+
+### Scenario 1 — Context: "what was I doing?"
+
+**The question:** you left a half-finished form eight minutes ago. What did the
+phone keep for you?
+
+**Shots:**
+
+1. Expense Portal, Step 1 of 3. Type **Purpose of travel** = `Client visit`,
+   **Travel dates** = `12-14 Mar`. Tap **Delhi**. Let the viewer watch real work
+   happen — this is the material the card is later made of.
+2. A message arrives. Switch to it, reply, stay away long enough to be a real
+   interruption rather than a beat of stagecraft.
+3. Come back **with the back gesture, not the launcher icon.** The icon resets
+   the demo; a person returning to a task would not use it anyway.
+4. The dot is where it has been the whole time, bottom-left. Touch it.
+5. Hold on the card without narrating:
+
+   > **Where you were**
+   > **Submitting your Q3 travel request**
+   > Done — Entered Purpose, Dates
+   > You chose — Destination: Delhi
+   > *Got it* *Next*
+
+**The line, if you say anything at all:**
+
+> "It waited to be asked. One interruption isn't enough to justify interrupting
+> her back."
+
+**Do not** claim the card appeared on its own here. It does, at CLS ≥ 60, after
+roughly a fourth interruption — but not on the first, and the run above is the
+first. If you want the unprompted card on film it is a separate take and a
+longer one; the measured ladder is in the Q&A section above.
+
+**Optional second take — the document variant.** Same question, different
+material: in **Document Editor Demo**, edit a line mid-document, leave, come
+back, tap the dot. The card names the line and Thread draws a **highlight over
+the line you were editing**, which clears when you tap *Got it*.
+
+Film this one only if you are willing to say the caveat out loud: the highlight
+works from coordinates the app reports through the SDK. It does **not** work in
+Word, Excel, or any app that has not integrated — the platform API for it
+returns bounds for about the first 140 characters and pre-scroll coordinates
+after that, so a highlight built on it would land on the wrong text. The card
+itself still works everywhere. The highlight does not.
+
+---
+
+### Scenario 2 — Navigator: "where do I go next?"
+
+**The question:** the card told you where you were. You still have to find the
+next control on a screen you have lost your place in.
+
+Use **Step 1**, which is deliberately badly laid out: two fields on one row,
+then three squeezed side by side, with labels truncated to `Travel…`,
+`Estimate…`, `C…`.
+
+**Shots:**
+
+1. Open on the packed rows and let the viewer try to read them. The truncation
+   is the point — three of the labels on this screen cannot be read at all.
+2. Fill Purpose and Dates as in Scenario 1, so there is real progress to carry.
+3. Tap the dot, then tap **Next** on the card.
+4. The ring lands on **Travel class** — the middle of the three-across row — and
+   the card names it in full.
+
+**The line:**
+
+> "The screen says `Travel…`. Thread says *Travel class*. It can read the label
+> the layout threw away."
+
+That is the strongest single moment in either scenario and it is worth a slow
+cut: screen text and spoken label side by side, visibly different.
+
+5. Keep tapping **Next**. The count moves `3/8 → 4/8 → …` and never changes its
+   denominator mid-task. Show two or three steps, not all eight.
+
+**What not to claim.** The navigator orders controls by reading order; it does
+not know the form's semantics and is not choosing the *best* next field, only
+the next one. And it can only sequence what the accessibility tree contains —
+on a Compose screen, content scrolled out of view is omitted from that tree
+entirely, so a form longer than one screenful is invisible below the fold. Step
+1 fits on one screen, which is why it sequences. Say this if asked; do not
+build a shot that quietly depends on nobody asking.
+
+**The honest note about Step 1.** It is a bad form on purpose, and the first fix
+for a bad form is a designer, not an assistive service. Thread's claim on that
+screen is not that it repairs the layout — it does not touch it — but that it
+carries your place through the interruption, which no amount of good layout
+does.
+
+---
+
 
 Built, but held for Q&A: sequencing mode, default hints, error explanation, the
 weights tuning panel, the complexity report.
