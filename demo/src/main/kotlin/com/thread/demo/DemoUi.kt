@@ -2,7 +2,10 @@ package com.thread.demo
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -11,11 +14,17 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -101,6 +110,63 @@ private fun CommitOnIdle(value: String, onCommit: () -> Unit) {
         if (value.isBlank()) return@LaunchedEffect
         delay(900)
         onCommit()
+    }
+}
+
+/**
+ * A picker: one control, many options, nothing visible until you open it.
+ *
+ * This is what replaced the twenty-five stacked radio buttons, and the swap is
+ * not a softening. A dropdown hides the options until the user commits to
+ * opening it, which is *harder* than a visible list, and it is what a finance
+ * system actually generates. The list underneath is unsorted, unsearchable and
+ * has no default, exactly as before.
+ *
+ * Read-only rather than a bare clickable row so the control keeps a text field's
+ * accessibility shape - a label in the hint and the selection in the text. A
+ * hand-rolled row reports its caption as its value, which would make an empty
+ * picker look answered.
+ */
+@Composable
+fun Picker(
+    label: String,
+    value: String,
+    options: List<String>,
+    onSelect: (String) -> Unit,
+) {
+    var open by remember { mutableStateOf(false) }
+
+    // A read-only text field still takes the tap for itself to claim focus, so a
+    // `clickable` wrapped round it never fires. Watching the field's own press
+    // interaction is the supported way to open a menu from one.
+    val presses = remember { MutableInteractionSource() }
+    LaunchedEffect(presses) {
+        presses.interactions.collect { if (it is PressInteraction.Release) open = true }
+    }
+
+    Box {
+        OutlinedTextField(
+            value = value,
+            onValueChange = {},
+            readOnly = true,
+            label = { Text(label) },
+            trailingIcon = { Text("\u25BE", color = SubtleInk) },
+            singleLine = true,
+            interactionSource = presses,
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            options.forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(option) },
+                    onClick = {
+                        open = false
+                        onSelect(option)
+                    },
+                )
+            }
+        }
     }
 }
 

@@ -52,6 +52,51 @@ class OfferComposerTest {
     }
 
     @Test
+    fun `a value that was chosen is not also reported as one that was typed`() {
+        val offer = OfferComposer.resumption(
+            state(
+                completed = listOf(
+                    FieldSnapshot("costCentre", "Cost centre", "CC-1201 Sales - EMEA", 1L),
+                ),
+                decisions = listOf(
+                    Decision("costCentre", "Cost centre", "CC-1201 Sales - EMEA", 0.2, 1L),
+                ),
+            ),
+            triggeredBy = null,
+        )
+
+        assertNull(
+            offer.done,
+            "picking from a list records a completed field as well as a decision, and " +
+                "saying 'You typed' about it is both wrong and a repeat of the line below",
+        )
+        assertEquals("Cost centre: CC-1201 Sales - EMEA", offer.decided)
+    }
+
+    @Test
+    fun `a decision alongside other work is still counted in the summary`() {
+        val offer = OfferComposer.resumption(
+            state(
+                completed = listOf(
+                    FieldSnapshot("costCentre", "Cost centre", "CC-1201", 1L),
+                    FieldSnapshot("budgetCode", "Budget code", "GB-4471", 2L),
+                ),
+                decisions = listOf(
+                    Decision("costCentre", "Cost centre", "CC-1201", 0.2, 1L),
+                ),
+            ),
+            triggeredBy = null,
+        )
+
+        assertEquals(
+            "Entered Cost centre, Budget code",
+            offer.done,
+            "the label summary is true however the value got there, so avoiding the " +
+                "wrong verb must not cost the user the sight of their own progress",
+        )
+    }
+
+    @Test
     fun `several fields are described by label, so values are not put on screen`() {
         val offer = OfferComposer.resumption(
             state(

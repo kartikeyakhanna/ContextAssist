@@ -30,18 +30,28 @@ object LiveComplexity {
      *
      * Scoring asks "how much is in front of this person right now", so it stops
      * at the fold. Sequencing asks "what order does this form go in", and the
-     * fold is not where the form ends. Reading only the viewport made the
-     * longest form in the demo report that it was not a form at all: its fields
-     * are below twenty-five cost centres, so nothing editable was in view, and
-     * the honest-sounding "this screen is not a form" was simply false. It also
-     * made the step count move as the user scrolled, which is the one thing a
-     * denominator must never do.
+     * fold is not where the form ends.
      *
      * Widened only inside a scrollable container, and only for nodes that have
      * been given a size. Content the user can bring into view by scrolling is
      * part of this screen; a collapsed section or the page behind a tab is not,
      * and proposing either would send someone looking for a control that is not
      * there.
+     *
+     * How far this actually reaches depends on the toolkit, and the difference is
+     * larger than it looks. A View-based form keeps its off-screen children in
+     * the tree, so they are recovered here. Compose does not: content clipped out
+     * of a scroll container is absent from the accessibility tree altogether, not
+     * merely marked invisible. Measured on the demo expense form as it was built
+     * originally - twenty-five stacked options with every field beneath them -
+     * the whole screen offered forty-four reachable nodes, none of them pruned,
+     * because the rest had never been there to prune. Sequencing correctly
+     * reported "not a form".
+     *
+     * There is no fix for that from this side; the nodes do not exist to be read.
+     * It is a reason to prefer compact controls when building a form, which is
+     * why the demo now uses a picker, and a reason the SDK path exists for apps
+     * that want to be certain.
      */
     fun flattenForm(root: AccessibilityNodeInfo?): List<LiveFacts.VisibleNode> {
         if (root == null) return emptyList()

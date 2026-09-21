@@ -86,7 +86,7 @@ object Sequencer {
      */
     fun plan(nodes: List<VisibleNode>): Plan? {
         val candidates = nodes.filter { it.isStepCandidate() }
-        if (candidates.count { it.isEditable } < MIN_FIELDS_FOR_FORM) return null
+        if (candidates.count { it.isValueControl() } < MIN_FIELDS_FOR_FORM) return null
 
         val labels = nodes.filter { !it.isStepCandidate() && !it.text.isNullOrBlank() }
         val decisions = group(readingOrder(candidates))
@@ -247,13 +247,36 @@ object Sequencer {
     }
 
     private fun VisibleNode.kind(): StepKind? = when {
+        // Before editability on purpose: a picker that also accepts typing is
+        // still a choice, and "choose a cost centre" is what the screen is
+        // actually asking. The naming and completion rules below treat the two
+        // identically, so the ordering only affects the verb.
+        isDropdown() -> StepKind.CHOOSE
         isEditable -> StepKind.FILL
         isCheckable -> StepKind.CHOOSE
         isClickable && LiveFacts.irreversible(text) -> StepKind.CONFIRM
         else -> null
     }
 
+    /**
+     * A choice that is shaped like a field.
+     *
+     * Missed entirely until now, and not for a small reason: a dropdown arrives
+     * non-editable, non-checkable and merely clickable, so every test above it
+     * says no. Measured on the demo expense form, the cost-centre picker was
+     * simply absent from the plan. Real forms are built out of these, and a
+     * sequencer that cannot see a picker cannot sequence a form that uses one.
+     *
+     * Compose maps `Role.DropdownList` onto the platform Spinner class, which is
+     * also what a View-based form reports, so one test covers both.
+     */
+    private fun VisibleNode.isDropdown(): Boolean =
+        className?.substringAfterLast('.') == "Spinner"
+
     private fun VisibleNode.isStepCandidate(): Boolean = kind() != null
+
+    /** Field-shaped: something the user supplies a value to, however they pick it. */
+    private fun VisibleNode.isValueControl(): Boolean = isEditable || isDropdown()
 
     /**
      * Done, and therefore not a step.
@@ -264,14 +287,18 @@ object Sequencer {
      * filled because the app labelled it.
      */
     private fun VisibleNode.isSatisfied(): Boolean = when (kind()) {
-        StepKind.FILL -> {
-            val value = text?.trim()
-            !value.isNullOrEmpty() && !value.equals(hintText?.trim(), ignoreCase = true) &&
-                !value.equals(contentDescription?.trim(), ignoreCase = true)
-        }
-        StepKind.CHOOSE -> isChecked
+        StepKind.FILL -> hasOwnValue()
+        // A dropdown reports its selection as text, exactly as a filled field
+        // does - including the trap of reporting its own label when empty.
+        StepKind.CHOOSE -> if (isDropdown()) hasOwnValue() else isChecked
         StepKind.CONFIRM -> false
         null -> false
+    }
+
+    private fun VisibleNode.hasOwnValue(): Boolean {
+        val value = text?.trim()
+        return !value.isNullOrEmpty() && !value.equals(hintText?.trim(), ignoreCase = true) &&
+            !value.equals(contentDescription?.trim(), ignoreCase = true)
     }
 
     /**
@@ -285,8 +312,12 @@ object Sequencer {
     private fun VisibleNode.toStep(labels: List<VisibleNode>): Step? {
         val kind = kind() ?: return null
 
-        val own = when (kind) {
-            StepKind.FILL -> hintText?.trimmedOrNull() ?: contentDescription?.trimmedOrNull()
+        val own = when {
+            // Both are field-shaped, so both carry the user's value in `text` and
+            // their name in the hint. Naming a dropdown from its text would call
+            // the step "CC-1201 Sales - EMEA" instead of "Cost centre".
+            kind == StepKind.FILL || isDropdown() ->
+                hintText?.trimmedOrNull() ?: contentDescription?.trimmedOrNull()
             else -> text?.trimmedOrNull() ?: contentDescription?.trimmedOrNull()
         }
 

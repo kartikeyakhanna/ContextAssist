@@ -95,9 +95,18 @@ object OfferComposer {
     private fun describeDone(state: TaskState): String? {
         val fields = state.completed
         val labels = fields.map { it.label }.distinct()
+
+        // A decision is recorded as a completed field as well. That is harmless in
+        // the label summary - "Entered Destination, Purpose" is true however the
+        // value got there - but not in the single-field form, which would announce
+        // a value picked from a list as one the user typed, immediately above the
+        // decision line saying the same value again.
+        val decided = state.decisions.map { it.fieldId }.toSet()
+        val typed = fields.filterNot { it.fieldId in decided }
+
         return when {
             fields.isEmpty() -> null
-            fields.size == 1 -> "You typed \"${fields.first().value.take(60)}\""
+            fields.size == 1 -> typed.firstOrNull()?.let { "You typed \"${it.value.take(60)}\"" }
             labels.size <= 3 -> "Entered " + labels.joinToString(", ")
             else -> "Entered " + labels.take(2).joinToString(", ") +
                 " and ${labels.size - 2} more"

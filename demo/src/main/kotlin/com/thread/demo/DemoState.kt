@@ -15,7 +15,10 @@ object DemoState {
 
     var costCentre: String = ""
     var budgetCode: String = ""
+    var glAccount: String = ""
     var apportionment: String = ""
+    var percentageSplit: String = ""
+    var wbsElement: String = ""
     var attachments: String = ""
 
     fun reset() {
@@ -24,7 +27,10 @@ object DemoState {
         travelDates = ""
         costCentre = ""
         budgetCode = ""
+        glAccount = ""
         apportionment = ""
+        percentageSplit = ""
+        wbsElement = ""
         attachments = ""
     }
 
@@ -70,4 +76,17 @@ object DemoState {
         "Fixed percentage",
         "Direct attribution",
     )
+
+    /**
+     * The choice that makes two more fields appear.
+     *
+     * Conditional fields are the part of enterprise forms that people describe
+     * as the form "changing under them": the work left is not knowable from
+     * looking at the screen, because answering one question adds two more. That
+     * is what makes a step count worth showing, and it is deterministic - the
+     * same answer always produces the same form, so the demo cannot drift.
+     */
+    const val SPLIT_TRIGGER = "Fixed percentage"
+
+    fun requiresSplit(): Boolean = apportionment == SPLIT_TRIGGER
 }

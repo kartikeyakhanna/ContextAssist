@@ -417,9 +417,72 @@ class SequencerTest {
         assertEquals(listOf("Policy number", "Amount"), plan.steps.map { it.label })
     }
 
+    private fun dropdown(label: String, chosen: String? = null, top: Int = 0) = VisibleNode(
+        text = chosen ?: label,
+        isClickable = true,
+        hintText = label,
+        bounds = LiveFacts.Bounds(0, top, 400, top + 40),
+        className = "android.widget.Spinner",
+    )
+
+    @Test
+    fun `a dropdown is a step even though it is neither editable nor checkable`() {
+        val plan = assertNotNull(
+            Sequencer.plan(
+                listOf(
+                    dropdown("Cost centre", top = 100),
+                    field("Budget code", top = 200),
+                    button("Review", top = 300),
+                ),
+            ),
+        )
+
+        assertEquals("Cost centre", plan.next?.label)
+        assertEquals(StepKind.CHOOSE, plan.next?.kind)
+    }
+
+    @Test
+    fun `a dropdown is named by its label, never by the option chosen`() {
+        val plan = assertNotNull(
+            Sequencer.plan(
+                listOf(
+                    dropdown("Cost centre", chosen = "CC-1201 Sales - EMEA", top = 100),
+                    dropdown("Apportionment basis", top = 200),
+                    field("Budget code", top = 300),
+                ),
+            ),
+        )
+
+        assertEquals(
+            listOf("Apportionment basis", "Budget code"),
+            plan.steps.map { it.label },
+            "a chosen dropdown is finished work, and the outstanding one is named " +
+                "by its label rather than by whatever option happens to be showing",
+        )
+        assertEquals(1, plan.completed)
+    }
+
+    @Test
+    fun `a screen of dropdowns is still a form`() {
+        assertNotNull(
+            Sequencer.plan(
+                listOf(
+                    dropdown("Cost centre", top = 100),
+                    dropdown("Apportionment basis", top = 200),
+                ),
+            ),
+            "requiring editable fields would reject a form built entirely out of " +
+                "pickers, which is what enterprise forms usually are",
+        )
+    }
+
     /**
-     * The cost-allocation screen: a long option group fills the first screenful
-     * and every editable field sits below it.
+     * A form whose fields sit below a long option group.
+     *
+     * Kept as a test of the sequencer, which orders whatever it is handed. Note
+     * what it does not prove: on Compose the nodes below the fold never reach
+     * this function, because clipped content is absent from the accessibility
+     * tree entirely. See `LiveComplexity.flattenForm`.
      */
     private fun allocationForm(visibleOnly: Boolean): List<VisibleNode> {
         val group = listOf(VisibleNode(text = "Cost centre", bounds = LiveFacts.Bounds(53, 300, 300, 340))) +
@@ -435,8 +498,8 @@ class SequencerTest {
     fun `a form is not a form when only the first screenful is read`() {
         assertNull(
             Sequencer.plan(allocationForm(visibleOnly = true)),
-            "one group and nothing else cannot be ordered — which is why sequencing " +
-                "reads past the fold rather than trusting the viewport",
+            "one group and nothing else cannot be ordered, so a screen read only as " +
+                "far as the fold is correctly declined rather than half-sequenced",
         )
     }
 

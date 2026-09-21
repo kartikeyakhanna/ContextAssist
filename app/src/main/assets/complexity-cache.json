@@ -18,20 +18,22 @@
     },
 
     "com.thread.demo/Step2Allocation": {
-      "score": 83.1,
+      "score": 87.5,
       "factors": {
-        "itemsToHold": 8,
-        "optionCount": 25,
+        "itemsToHold": 9,
+        "optionCount": 29,
         "progressVisible": false,
         "irreversibleActions": 1,
-        "crossReferences": 3,
-        "languageComplexity": 0.7
+        "crossReferences": 4,
+        "languageComplexity": 0.8
       },
       "offendingElements": [
-        "Cost centre picker: 25 options, no default, no search",
-        "Budget code: must be looked up in another app",
-        "No indication of which of the 4 sections are mandatory",
-        "'Apportionment basis' - jargon, undefined on screen"
+        "Cost centre picker: 25 options, unsorted, no default, no search",
+        "Budget code and GL account: two similar-looking codes from different systems",
+        "Percentage split appears only after 'Fixed percentage' is chosen",
+        "Project / WBS element is optional but nothing on screen says so",
+        "Validation reports one error at a time, so fixing one reveals the next",
+        "'Apportionment basis', 'GL account', 'WBS element' - jargon, undefined on screen"
       ]
     },
 
