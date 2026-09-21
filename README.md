@@ -294,7 +294,9 @@ Stated plainly, because a demo that overclaims gets taken apart in Q&A.
   signal; it does not break it, because the signal was designed to degrade rather
   than guess.
 - **The push path fires, but only under genuine severity.** Offers are made at
-  CLS ≥ 60. Measured on device, on an 83.1-complexity screen: one 40-second
+  CLS ≥ 60. Measured on device, on the cost-allocation screen (83.1 as the form
+  then stood; the rebuilt form scores 87.5, and the run has not been repeated):
+  one 40-second
   interruption reaches **39**; a second (100s) reaches **52**; a third (150s)
   reaches **58**; a fourth (180s) reaches **62**, at which point the resumption
   card is offered without being asked for. So the threshold is reachable, and it

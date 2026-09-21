@@ -240,7 +240,8 @@ On an API 35 emulator, end to end:
 
 - the dot appears when `startTask` arrives from the SDK
 - leaving to the Finance Portal logs `away -> com.thread.lookup`
-- returning 40 seconds later resolves `Step2Allocation` → SML 83.1 from cache and
+- returning 40 seconds later resolves `Step2Allocation` → SML from cache (83.1 at
+  the time of this run; 87.5 since the form was rebuilt) and
   produces a full CLS factor breakdown
 - tapping the dot draws the resumption card with *Done: Entered Destination,
   Purpose* and *You chose: Destination: Delhi*

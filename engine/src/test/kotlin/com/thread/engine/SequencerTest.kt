@@ -187,6 +187,37 @@ class SequencerTest {
     }
 
     @Test
+    fun `a long form is counted in full even though only six are ever listed`() {
+        // Twelve fields. Showing twelve would be a confession rather than a help,
+        // so the preview stops at six - but the count must not, or the card would
+        // read "1 of 6" on a twelve-field form and then climb as she worked,
+        // which is the one thing a denominator must never do.
+        val nodes = (1..12).map { field("Field $it", top = it * 100) }
+
+        val plan = assertNotNull(Sequencer.plan(nodes))
+
+        assertEquals(12, plan.total, "the denominator must describe the whole form")
+        assertEquals(1, plan.position)
+        assertEquals(Sequencer.MAX_STEPS, plan.preview.size, "only six are offered")
+        assertEquals("Field 1", plan.next?.label)
+    }
+
+    @Test
+    fun `the denominator does not move as the form is filled`() {
+        val empty = (1..9).map { field("Field $it", top = it * 100) }
+        val partly = empty.mapIndexed { index, node ->
+            if (index < 4) node.copy(text = "answered") else node
+        }
+
+        val before = assertNotNull(Sequencer.plan(empty))
+        val after = assertNotNull(Sequencer.plan(partly))
+
+        assertEquals(before.total, after.total, "total changed as the user worked")
+        assertEquals(1, before.position)
+        assertEquals(5, after.position, "position advances, denominator holds")
+    }
+
+    @Test
     fun `a field that cannot be named is skipped rather than invented`() {
         val nodes = listOf(
             VisibleNode(text = "", isEditable = true),

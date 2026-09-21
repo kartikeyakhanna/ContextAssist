@@ -67,12 +67,24 @@ object Sequencer {
         val next: Step? get() = steps.firstOrNull()
         val total: Int get() = completed + steps.size + blocked
         val position: Int get() = completed + 1
+
+        /**
+         * What a caller should list if it ever lists more than [next].
+         *
+         * Capped, because a fifteen-item plan is a confession rather than a help.
+         * The cap lives here and not in [steps] deliberately: truncating the plan
+         * itself would shorten [total], so a twelve-field form would announce
+         * "1 of 6" and then climb as the user worked - the drifting denominator
+         * this class exists to prevent. What is counted and what is shown are
+         * different questions.
+         */
+        val preview: List<Step> get() = steps.take(MAX_STEPS)
     }
 
     /** Below this, a screen is a menu, not a form. Menus get targeting, not steps. */
     const val MIN_FIELDS_FOR_FORM = 2
 
-    /** Nobody reads past this, and a plan that long is a confession, not a help. */
+    /** Nobody reads past this, so nothing lists more. It never limits the count. */
     const val MAX_STEPS = 6
 
     /**
@@ -105,7 +117,7 @@ object Sequencer {
         val steps = (rest + terminal).mapNotNull { it.toStep(labels) }
         if (steps.isEmpty()) return null
 
-        return Plan(steps.take(MAX_STEPS), completed, blocked)
+        return Plan(steps, completed, blocked)
     }
 
     /**

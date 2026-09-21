@@ -19,13 +19,17 @@ import androidx.compose.ui.unit.sp
 import com.thread.sdk.ThreadSdk
 
 /**
- * Step 3. Design-time score 41.0 - moderate, with one flagged property: submit
- * is irreversible and does not say so.
+ * Step 3. Design-time score 32.6 - low, with one flagged property: submit is
+ * irreversible and does not say so.
  *
  * That omission is the entire reason the reassurance chip exists. Hesitating in
  * front of an irreversible button is not indecision; it is the rational response
  * to an unstated consequence, and it is far more costly for someone who cannot
  * cheaply rebuild the context needed to re-check their work.
+ *
+ * Note that the chip does not wait for a high score. A calm screen with one
+ * unstated consequence is exactly where hesitation means something, and gating
+ * reassurance behind overall load would have missed it.
  */
 class Step3Review : ComponentActivity() {
 
@@ -53,9 +57,12 @@ class Step3Review : ComponentActivity() {
             SummaryRow("Purpose", DemoState.purpose)
             SummaryRow("Dates", DemoState.travelDates)
             SummaryRow("Destination", DemoState.destination)
+            SummaryRow("Travel class", DemoState.travelClass)
+            SummaryRow("Estimated cost", DemoState.estimatedCost)
             SummaryRow("Cost centre", DemoState.costCentre)
             SummaryRow("Budget code", DemoState.budgetCode)
             SummaryRow("Apportionment", DemoState.apportionment)
+            SummaryRow("Approver", DemoState.approver)
 
             Spacer(Modifier.height(16.dp))
             PrimaryButton("Submit request") {

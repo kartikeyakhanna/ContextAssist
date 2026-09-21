@@ -128,7 +128,7 @@ Order of trust, in `ThreadAccessibilityService.smlFor`:
 3. `Sml.NEUTRAL`, only when the app exposes nothing readable
 
 Measured on stock apps with no integration: Android Settings home **20.2**, Clock
-**32.3**, against the hand-scored Expense Portal's **83.1**. The ordering is the
+**32.3**, against the hand-scored Expense Portal's **87.5**. The ordering is the
 point — it separates a calm screen from a punishing one with nobody having scored
 either in advance.
 
@@ -160,8 +160,10 @@ precision — `Arbiter.precision()` is accepted ÷ shown.
 
 ### What these thresholds do in practice
 
-Measured on a live emulator run, on `Step2Allocation` (SML 83.1, 25 cost centres),
-one continuous task interrupted repeatedly:
+Measured on a live emulator run, on `Step2Allocation` (SML 83.1 as the form then
+stood, 25 cost centres in a radio group), one continuous task interrupted
+repeatedly. The form has since been rebuilt and scores 87.5; this run has not
+been repeated, and the numbers below are left as they were measured:
 
 | Interruption | Away | CLS | Outcome |
 |---|---|---|---|

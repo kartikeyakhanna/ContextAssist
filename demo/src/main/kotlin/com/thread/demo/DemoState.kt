@@ -12,6 +12,9 @@ object DemoState {
     var purpose: String = ""
     var destination: String = ""
     var travelDates: String = ""
+    var travelClass: String = ""
+    var estimatedCost: String = ""
+    var approver: String = ""
 
     var costCentre: String = ""
     var budgetCode: String = ""
@@ -25,6 +28,9 @@ object DemoState {
         purpose = ""
         destination = ""
         travelDates = ""
+        travelClass = ""
+        estimatedCost = ""
+        approver = ""
         costCentre = ""
         budgetCode = ""
         glAccount = ""
@@ -33,6 +39,20 @@ object DemoState {
         wbsElement = ""
         attachments = ""
     }
+
+    /**
+     * Travel classes. Three options, plainly named, no policy jargon.
+     *
+     * Part of keeping step 1 a *well-built* form while making it a longer one.
+     * The load on this screen should come from how much there is to hold, not
+     * from anything being unclear - otherwise the demo is arguing against a
+     * form nobody would ship.
+     */
+    val travelClasses: List<String> = listOf(
+        "Economy",
+        "Premium economy",
+        "Business",
+    )
 
     /**
      * Twenty-five cost centres, unsorted, no search, no default.

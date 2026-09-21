@@ -5,10 +5,10 @@
 
   "screens": {
     "com.thread.demo/Step1Details": {
-      "score": 18.4,
+      "score": 38.3,
       "factors": {
-        "itemsToHold": 1,
-        "optionCount": 3,
+        "itemsToHold": 6,
+        "optionCount": 6,
         "progressVisible": true,
         "irreversibleActions": 0,
         "crossReferences": 0,
@@ -38,9 +38,9 @@
     },
 
     "com.thread.demo/Step3Review": {
-      "score": 41.0,
+      "score": 32.6,
       "factors": {
-        "itemsToHold": 2,
+        "itemsToHold": 3,
         "optionCount": 4,
         "progressVisible": true,
         "irreversibleActions": 1,
