@@ -5,16 +5,22 @@
 
   "screens": {
     "com.thread.demo/Step1Details": {
-      "score": 38.3,
+      "score": 50.2,
       "factors": {
-        "itemsToHold": 6,
-        "optionCount": 6,
+        "itemsToHold": 8,
+        "optionCount": 12,
         "progressVisible": true,
         "irreversibleActions": 0,
-        "crossReferences": 0,
-        "languageComplexity": 0.15
+        "crossReferences": 1,
+        "languageComplexity": 0.3
       },
-      "offendingElements": []
+      "_note": "The rubric has no term for layout, so the multi-column rows below are recorded but do not move the score. The scan cost is real and currently unmeasured.",
+      "offendingElements": [
+        "Two fields on one row, then three on the next: no single column to scan",
+        "Three controls across truncates their labels",
+        "Currency sits beside Estimated cost but is a separate decision with no default",
+        "Employee ID has to be looked up and the screen does not say where"
+      ]
     },
 
     "com.thread.demo/Step2Allocation": {

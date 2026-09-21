@@ -6,6 +6,7 @@ import com.thread.engine.model.Interruption
 import com.thread.engine.model.TaskState
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -205,5 +206,41 @@ class OfferComposerTest {
 
         assertEquals("Entered Destination, Purpose", offer.done)
         assertTrue(offer.decided!!.contains("Delhi"))
+    }
+
+    @Test
+    fun `a field with no name is counted but never given one`() {
+        // Observed on device: Thread's own capture had no label for a Compose
+        // field and used the placeholder "Typed", so the card read "Entered
+        // Purpose, Dates, Typed" - naming a field that is not on the screen, to
+        // someone who has lost their place and would go looking for it.
+        val offer = OfferComposer.resumption(
+            state(
+                completed = listOf(
+                    FieldSnapshot("purpose", "Purpose", "Client visit", 1L),
+                    FieldSnapshot("dates", "Dates", "12-14 Mar", 2L),
+                    FieldSnapshot("unknown", "", "48120", 3L),
+                ),
+            ),
+            triggeredBy = null,
+        )
+
+        assertEquals("Entered Purpose, Dates and 1 more", offer.done)
+        assertFalse(offer.done!!.contains("Typed"), "a placeholder must never read as a field name")
+    }
+
+    @Test
+    fun `work nobody could name still says something useful`() {
+        val offer = OfferComposer.resumption(
+            state(
+                completed = listOf(
+                    FieldSnapshot("a", "", "first", 1L),
+                    FieldSnapshot("b", "", "ACME-4471", 2L),
+                ),
+            ),
+            triggeredBy = null,
+        )
+
+        assertEquals("You typed \"ACME-4471\"", offer.done)
     }
 }

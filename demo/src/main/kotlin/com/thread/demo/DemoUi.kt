@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -29,6 +30,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
@@ -81,12 +83,13 @@ fun Field(
     onCommit: () -> Unit,
     helper: String? = null,
     error: String? = null,
+    modifier: Modifier = Modifier,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
         OutlinedTextField(
             value = value,
             onValueChange = onValueChange,
-            label = { Text(label) },
+            label = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
             isError = error != null,
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
@@ -95,6 +98,29 @@ fun Field(
         helper?.let { Text(it, color = SubtleInk, fontSize = 12.sp) }
     }
     CommitOnIdle(value, onCommit)
+}
+
+/**
+ * Several controls sharing one line.
+ *
+ * A genuinely hostile piece of form design, and an extremely common one. Two
+ * fields on one row and three on the next destroys the single scan column that
+ * makes a form followable: the eye has no consistent place to go next, and
+ * fields that have nothing to do with each other end up visually grouped purely
+ * because they fit. Squeezing three across also truncates the labels, so the
+ * one piece of information telling you what to type is the first thing cut.
+ *
+ * Kept here rather than inlined because it is worth naming for what it is. This
+ * is not disorder invented for a demo - it is what happens when a form is laid
+ * out to fit a desktop grid and then rendered on a phone.
+ */
+@Composable
+fun FieldRow(content: @Composable RowScope.() -> Unit) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.Top,
+        content = content,
+    )
 }
 
 /**
@@ -133,6 +159,7 @@ fun Picker(
     value: String,
     options: List<String>,
     onSelect: (String) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     var open by remember { mutableStateOf(false) }
 
@@ -144,12 +171,12 @@ fun Picker(
         presses.interactions.collect { if (it is PressInteraction.Release) open = true }
     }
 
-    Box {
+    Box(modifier = modifier) {
         OutlinedTextField(
             value = value,
             onValueChange = {},
             readOnly = true,
-            label = { Text(label) },
+            label = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
             trailingIcon = { Text("\u25BE", color = SubtleInk) },
             singleLine = true,
             interactionSource = presses,

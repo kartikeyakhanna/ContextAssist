@@ -14,6 +14,8 @@ object DemoState {
     var travelDates: String = ""
     var travelClass: String = ""
     var estimatedCost: String = ""
+    var currency: String = ""
+    var employeeId: String = ""
     var approver: String = ""
 
     var costCentre: String = ""
@@ -30,6 +32,8 @@ object DemoState {
         travelDates = ""
         travelClass = ""
         estimatedCost = ""
+        currency = ""
+        employeeId = ""
         approver = ""
         costCentre = ""
         budgetCode = ""
@@ -43,15 +47,24 @@ object DemoState {
     /**
      * Travel classes. Three options, plainly named, no policy jargon.
      *
-     * Part of keeping step 1 a *well-built* form while making it a longer one.
-     * The load on this screen should come from how much there is to hold, not
-     * from anything being unclear - otherwise the demo is arguing against a
-     * form nobody would ship.
+     * The words are still clear. What is no longer clear is the form around
+     * them: this control shares a row with two others, so its label is truncated
+     * and its meaning now depends on noticing which box sits above which.
      */
     val travelClasses: List<String> = listOf(
         "Economy",
         "Premium economy",
         "Business",
+    )
+
+    /** Six currencies, no default, in a field barely wide enough to show one. */
+    val currencies: List<String> = listOf(
+        "INR",
+        "USD",
+        "EUR",
+        "GBP",
+        "SGD",
+        "AED",
     )
 
     /**

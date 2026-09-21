@@ -59,6 +59,8 @@ class Step3Review : ComponentActivity() {
             SummaryRow("Destination", DemoState.destination)
             SummaryRow("Travel class", DemoState.travelClass)
             SummaryRow("Estimated cost", DemoState.estimatedCost)
+            SummaryRow("Currency", DemoState.currency)
+            SummaryRow("Employee ID", DemoState.employeeId)
             SummaryRow("Cost centre", DemoState.costCentre)
             SummaryRow("Budget code", DemoState.budgetCode)
             SummaryRow("Apportionment", DemoState.apportionment)

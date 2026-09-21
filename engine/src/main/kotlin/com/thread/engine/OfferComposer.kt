@@ -94,7 +94,14 @@ object OfferComposer {
      */
     private fun describeDone(state: TaskState): String? {
         val fields = state.completed
-        val labels = fields.map { it.label }.distinct()
+
+        // A field Thread watched rather than was told about may have no name at
+        // all. It is still work the user did, so it is counted - but it is not
+        // named, and no stand-in is put in its place. Listing a field that is not
+        // on the screen sends someone who has lost their place looking for it.
+        val named = fields.filter { it.label.isNotBlank() }
+        val names = named.map { it.label }.distinct()
+        val anonymous = fields.size - named.size
 
         // A decision is recorded as a completed field as well. That is harmless in
         // the label summary - "Entered Destination, Purpose" is true however the
@@ -104,12 +111,17 @@ object OfferComposer {
         val decided = state.decisions.map { it.fieldId }.toSet()
         val typed = fields.filterNot { it.fieldId in decided }
 
+        val shown = names.take(2)
+        val remainder = (names.size - shown.size) + anonymous
+
         return when {
             fields.isEmpty() -> null
             fields.size == 1 -> typed.firstOrNull()?.let { "You typed \"${it.value.take(60)}\"" }
-            labels.size <= 3 -> "Entered " + labels.joinToString(", ")
-            else -> "Entered " + labels.take(2).joinToString(", ") +
-                " and ${labels.size - 2} more"
+            // Nothing nameable at all, so fall back to the one thing that is
+            // certainly meaningful: a value the user actually entered.
+            names.isEmpty() -> typed.lastOrNull()?.let { "You typed \"${it.value.take(60)}\"" }
+            remainder == 0 && names.size <= 3 -> "Entered " + names.joinToString(", ")
+            else -> "Entered " + shown.joinToString(", ") + " and $remainder more"
         }
     }
 

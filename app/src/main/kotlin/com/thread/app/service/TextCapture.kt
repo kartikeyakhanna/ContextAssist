@@ -23,7 +23,8 @@ class TextCapture(
     data class Entry(
         val packageName: String,
         val fieldId: String,
-        val label: String,
+        /** Null when the app exposes no human name for this field. Never invented. */
+        val label: String?,
         val value: String,
     )
 
@@ -128,11 +129,16 @@ class TextCapture(
     /**
      * A human label for the field, or none.
      *
-     * Falls back to "Typed" rather than to the view id: "et_q_search_box" on a card
-     * is worse than no label at all, and the value itself usually carries the
-     * meaning anyway.
+     * Returns null rather than a placeholder. A view id is no good - "et_q_search_box"
+     * on a card is worse than no label at all - and nor is a stand-in like "Typed",
+     * which reads as a field name and so becomes one: the card said "Entered Purpose,
+     * Dates, Typed", listing a field that does not exist on the screen and inviting
+     * someone who has lost their place to go looking for it. A card that carries
+     * memory for people cannot afford to name things that are not there.
+     *
+     * Unnamed work is still real work, so it is counted; it is just not named.
      */
-    private fun labelOf(source: AccessibilityNodeInfo?): String {
+    private fun labelOf(source: AccessibilityNodeInfo?): String? {
         val described = source?.contentDescription?.toString()?.trim()
         if (!described.isNullOrEmpty() && described.length <= 40) return described
 
@@ -140,6 +146,6 @@ class TextCapture(
             val hint = source?.hintText?.toString()?.trim()
             if (!hint.isNullOrEmpty() && hint.length <= 40) return hint
         }
-        return "Typed"
+        return null
     }
 }

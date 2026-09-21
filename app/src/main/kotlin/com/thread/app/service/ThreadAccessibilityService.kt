@@ -436,19 +436,36 @@ class ThreadAccessibilityService : AccessibilityService() {
      * Note this is the same event type an integrated app sends through the SDK.
      * Tier 1 and Tier 2 differ in how reliably the label is known, not in kind, so
      * the card and every score treat them identically from here on.
+     *
+     * Except when they are the same field twice. Watching the tree cannot tell a
+     * field the app already reported from one it did not, and on a Compose screen
+     * there is no view id to tell them apart either - every text field arrives
+     * under one generic id. Measured on the demo: the app reported Purpose and
+     * Dates through the SDK with their real names, and this path recorded both
+     * values again with no name, so the card listed work that had already been
+     * counted and named a field that was not on the screen. If the value is
+     * already held, the app has said it better, and there is nothing to add.
      */
     private fun onTextCommitted(entry: TextCapture.Entry) {
         val session = sessions.get(entry.packageName) ?: return
         val now = System.currentTimeMillis()
 
-        Log.d(TAG, "captured: ${entry.packageName} ${entry.label}='${entry.value}'")
+        val alreadyKnown = session.builder.state.completed.any {
+            it.fieldId != entry.fieldId && it.value == entry.value
+        }
+        if (alreadyKnown) {
+            Log.d(TAG, "captured (already reported, ignored): ${entry.packageName} '${entry.value}'")
+            return
+        }
+
+        Log.d(TAG, "captured: ${entry.packageName} ${entry.label ?: "<unnamed>"}='${entry.value}'")
 
         session.builder.apply(
             FieldCommit(
                 ts = now,
                 screenId = session.builder.state.currentScreenId,
                 fieldId = entry.fieldId,
-                label = entry.label,
+                label = entry.label.orEmpty(),
                 value = entry.value,
                 isDecision = false,
             ),
